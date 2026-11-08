@@ -8,15 +8,18 @@ Build a working **TOTP verifier/generator in pure redstone**, and demonstrate it
 
 "Working" means: for a baked-in secret and an externally supplied time counter, the redstone circuit outputs the same 6-digit code as a standard authenticator app (HMAC-SHA1, 30 s period).
 
-## Current state (stage 1 done; MCHPRS/tick-rate recon done; stage 2 gate-level model done and verified)
+## Current state (stage 1 + 2 done and verified; stage 3 toolchain proven end-to-end on a minimal real circuit; full-core layout not yet attempted)
 
 Files in this repo (commit them as-is):
 
 - `ref.py`: from-scratch SHA-1, HMAC-SHA1, HOTP/TOTP. Passes the RFC 4226 vectors (10) and RFC 6238 SHA-1 vectors (6), and matches `hashlib`/`hmac` on edge-length messages and keys.
 - `datapath.py`: bit-exact register-transfer model of the proposed hardware. Passes the RFC vectors and 3,000 random keys/counters against `ref.py`. Run with `python3 datapath.py` (do not use `-I`; it breaks the local import).
 - `netlist.py`: gate-level model (NOT/AND/OR/XOR primitives with redstone-tick delays) of the round engine, two 32-bit adder choices (ripple, carry-select block=8), and the full 2-compression + truncate/mod core built from them. Verified bit-exact against `ref.py` on the RFC 4226 vectors (10) + 40 random keys/counters for each adder. Run with `python3 netlist.py`.
+- `schem.py`: Sponge Schematic v2 writer matching MCHPRS's loader. `build_smoke_schem.py`, `build_dust_test.py`, `build_not_gate_test.py`: schematic fixtures for the circuit tests below.
+- `mchprs/`: cloned from [MCHPR/MCHPRS](https://github.com/MCHPR/MCHPRS) (not committed — nested git repo, see `.gitignore`), built locally as `mchprs:local`.
+- `bot/`: Node/mineflayer driver (`totp-bot:local` image) — `smoke_test.js`, `dust_probe.js` (the verified working circuit test), `not_gate_probe.js` (inconclusive, kept for reference — see stage 3 notes).
 
-All three were run and passed. Nothing below stage 2 has been built or tested.
+All four Python files were run and passed. See the stage 3 section below for what's verified against a real running server vs. still outstanding.
 
 ### Stage 2 results (measured from the gate-level model in `netlist.py`, not from a running build)
 
@@ -75,11 +78,28 @@ These are **estimates from the gate-delay model**, not measurements from a live 
 3. ✅ Verified against `ref.py`/`datapath.py` (RFC vectors + 40 random vectors, both adder choices, bit-exact). Gate count and critical path reported above. Schedule register and control FSM were not modelled as separate gate-level state (the netlist drives the whole 80-round loop combinationally per cycle in software) — fine for correctness/critical-path purposes, but stage 3's actual layout still needs a real FSM/shift-register design.
 4. Architecture pick: **carry-select (block=8) is the better default** — 20% faster for 2.1x the gates, and gates are cheap relative to redstone's real cost driver (footprint/wiring), not yet modelled. Revisit if stage 3 footprint estimates say otherwise. Carry-lookahead still unmodelled; worth a quick follow-up if carry-select's footprint turns out to be the bottleneck.
 
-### Stage 3: layout + run in a simulator
-1. Write a generator that turns the netlist into a block layout (bit-sliced regular structures: adders, shift registers, XOR arrays). Emit a schematic.
-2. Build MCHPRS in Docker (Rust image; `cargo build --release`) and load the schematic.
-3. Drive the counter input, clock the core, read the 6-digit output. Compare to `ref.py` for the RFC vectors first, then random counters.
-4. Measure actual time per code at the simulator's tick rate.
+### Stage 3: layout + run in a simulator — toolchain proven, full core NOT built
+
+**What's done and verified (2026-11-08), all against a real running MCHPRS container, not simulated:**
+
+1. ✅ MCHPRS built from source in Docker (`mchprs/Dockerfile`, the project's own — `docker build -t mchprs:local mchprs/`). Rust release build took ~9 min. Image is 14.9MB (scratch-based). Container run with `-v ./mchprs_data:/data -p 127.0.0.1:25565:25565`, confirmed listening and accepting connections.
+2. ✅ `schem.py`: a from-scratch Sponge Schematic v2 writer matching MCHPRS's loader (`mchprs/crates/schematic/src/lib.rs`) byte-for-byte (palette compound, varint block data in y/z/x order, `WEOffset*` metadata, `DataVersion=3700`). Round-trips correctly through `nbtlib` and loads via `//load <name>.schem` in a live server.
+3. ✅ A Node/mineflayer bot (`bot/`, Dockerfile + `package.json`) drives the server headlessly — MCHPRS has no RCON/console-command path, everything is a real in-game player action (`//load`, `//paste`, lever clicks), so a protocol-level bot is required, not optional.
+4. ✅ **End-to-end circuit test, fully verified**: `build_dust_test.py` generates a lever → redstone dust → lamp circuit; `bot/dust_probe.js` loads it, flips the lever, and reads back real block state via `bot.blockAt(...).getProperties()`. Measured: lever off → dust `power=0`, lamp `lit=false`; lever on → dust `power=15`, lamp `lit=true`. This confirms the full loop (generate schematic → load into a live server → drive an input → read a real output) works correctly.
+
+**Real gotchas hit and fixed along the way (useful for anyone continuing this):**
+- mineflayer's `'spawn'` event never fires against MCHPRS — it waits on an `update_health` packet MCHPRS doesn't send. Use `'login'` instead (see `bot/smoke_test.js`, `bot/dust_probe.js`).
+- MCHPRS plots have **no floor by default** — a bot standing there free-falls under local gravity prediction indefinitely. Don't use `/tp` + assume it landed; use `bot.creative.flyTo(pos)` (disables local gravity, holds an exact position) before doing anything position-dependent (paste anchor, block reads).
+- `//load`'s filename argument is validated against `[a-zA-Z0-9_.]+\.schem(atic)?` (substring match) — you must include the `.schem` extension in the chat command, e.g. `//load dust_test.schem`, not `//load dust_test`.
+- **A pasted schematic's redstone components keep the exact blockstate you specified — MCHPRS does not recompute `lit`/`powered` from neighboring context on paste.** An early NOT-gate test (`not_gate_probe.js`, kept for reference) placed a wall torch without an explicit `lit=true` and it stayed permanently unlit regardless of input, giving a false reading.
+- **Levers/torches do NOT directly power arbitrary adjacent mechanism blocks** (lamps) the way this project initially assumed — that NOT-gate test's one "working" lamp turned out to be lit because it was incidentally adjacent to the *lever's own cell*, not because of the torch. Confirmed by the dust test: power only reliably reaches a lamp through actual redstone wire (dust) touching it. **Any future gate/adder layout must route power through dust/repeaters explicitly, never assume bare adjacency.** This directly affects the full-core layout effort below.
+
+**What's NOT done — reported honestly rather than faked:**
+- The NOT-gate truth table itself is still unconfirmed (the lit-torch, no-dust version read "always unlit" for all three candidate lamp spots — inconclusive, not wrong, just needs a dust-routed re-test).
+- No AND/OR/XOR gate, adder, or register has been built as a real placed structure yet.
+- **The full core (895 state bits, ~130k–280k gates per `netlist.py`) is not laid out.** This is a real placement-and-routing problem at a scale that was not attempted this session — it is a multi-session effort, not a remaining checklist item. Per the working rules, this is reported directly rather than assumed solvable from the gate-level model alone.
+
+**Recommended path if continuing:** build one verified cell at a time, empirically (dust-routed NOT, then AND/OR/XOR, then a 1-bit full adder truth table) using the now-working bot+schematic+read-back loop above, before attempting anything at word width. Each cell becomes a reusable schematic fragment once its truth table is confirmed. Only after a handful of verified primitive cells exist does a bit-sliced word-width generator become worth writing.
 
 ### Optional: vanilla datapack path
 Only if the user asks. Needs a vanilla 1.21.x server (not MCHPRS), RCON enabled, and the scoreboard-based SHA-1 emulation. Useful as a second implementation to cross-check intermediate state words.
