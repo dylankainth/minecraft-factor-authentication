@@ -8,7 +8,7 @@ Build a working **TOTP verifier/generator in pure redstone**, and demonstrate it
 
 "Working" means: for a baked-in secret and an externally supplied time counter, the redstone circuit outputs the same 6-digit code as a standard authenticator app (HMAC-SHA1, 30 s period).
 
-## Current state (stage 1 done, verified)
+## Current state (stage 1 done and verified; MCHPRS/tick-rate recon done; stage 2 in progress)
 
 Files in this repo (commit them as-is):
 
@@ -35,14 +35,16 @@ Both were run and passed. Nothing below stage 1 has been built or tested.
 3. **Storage cell** for the 512-bit schedule register: pick whatever is smallest and reliable in the chosen simulator.
 4. **Mod 10^6** alternatives to the restoring divider (the digit conversion is the least regular part).
 
-## Unverified claims: check before relying on them
+## Recon findings (2026-11-08, confirmed via web search, not yet via a running build)
 
-These came from memory or rough estimates, not measurement:
-
-- `/tick rate` / `/tick sprint` exist in vanilla 1.20.3+ and allow up to 10,000 TPS.
-- MCHPRS (redstone-focused plot server) is the intended simulator for stage 3. Check which Minecraft version it currently targets, how to load a schematic into a plot, and how to set its redstone tick rate (`/rtps` as far as I know). It does not implement vanilla datapacks/scoreboards, so it cannot run the datapack path.
-- Timing estimate: about 7-20 min per code at 20 TPS with a ripple adder; about 10-120 s with a fast adder plus sprinting. **These are guesses.** Replace them with measured numbers.
-- A claimed redstone SHA-256 "Bitcoin miner" and a redstone language model exist online; sourcing for the first is weak. No prior redstone/datapack TOTP implementation was found (weak evidence; niche).
+- **MCHPRS targets Minecraft 1.20.4.** Build with `cargo build --release`; binary lands at `./target/release/mchprs[.exe]`. Source: [MCHPR/MCHPRS](https://github.com/MCHPR/MCHPRS).
+- **Tick rate control confirmed:** `/rtps [rtps|unlimited]` sets redstone ticks/sec per plot, default 10, fractional values supported. **2 game ticks = 1 redstone tick** in MCHPRS — fold this into cycle→seconds conversions. Source: [PR #205](https://github.com/MCHPR/MCHPRS/pull/205), [README](https://github.com/MCHPR/MCHPRS/blob/master/README.md).
+- **Schematic loading confirmed:** MCHPRS ships a built-in WorldEdit clone. `//load` reads a schematic from `./schems/`, `//save` writes one, `//sel` / `/plot select` makes selections. Stage 3's generator should emit a standard `.schem` into that folder.
+- **No published number for max throughput under `/rtps unlimited`** — bounded by real CPU/thread throughput, not a documented constant. Still needs an empirical measurement once something is built.
+- Vanilla `/tick rate <1.0–10000.0>` and `/tick sprint` **are real**, added in 1.20.3, require permission level 3. Confirms the optional datapack-path claim; still secondary/optional per the plan.
+- Docker 26.1.1 confirmed available locally.
+- Timing estimate (7-20 min/code at 20 TPS ripple adder; 10-120 s fast-adder+sprint) is still a **guess**, not yet replaced by a measurement — do that once the netlist/gate-delay model (stage 2) and a build (stage 3) exist.
+- A claimed redstone SHA-256 "Bitcoin miner" and a redstone language model exist online; sourcing for the first is weak. No prior redstone/datapack TOTP implementation was found (weak evidence; niche) — unchanged, not re-checked this pass.
 
 ## Plan
 
