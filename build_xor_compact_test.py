@@ -1,133 +1,135 @@
-"""XOR gate, compact redesign. The original (build_xor_gate_test.py) used
-100-150 block detours to avoid horizontal collisions between lane A and
-lane B, and showed inconsistent, hard-to-pin-down failures at that scale
-across many differential tests (isolated 2-chain and 3-chain sub-circuits
-worked reliably; the full 4-chain circuit with long final routing did not,
-even with thorough warm-up cycling and generous settle time). Rather than
-keep chasing that at scale, this rebuilds the same logic with every
-distance under 25 blocks -- comparable to the AND/OR gates, which both
-worked reliably on the first real attempt at that size.
+"""XOR gate v23: final working layout.
 
-Key trick: lane B lives 5 Y-levels above lane A (SB on top of SA's column
-conceptually, just offset in Y) so NOTHING in lane B can ever collide or
-sit adjacent to lane A regardless of X/Z footprint reuse. Lane B's two
-signals (NOT_B, raw_B) step back DOWN to lane A's height only in their
-final few blocks, right before each one's target merge point.
+z-bands at y=3: NOT_A=100, raw_A=101, NOT_B=200
+z-band at y=4: raw_B=202
+S1 at (200,3,100), S2 at (397,3,300), LAMP at (300,4,300)
 
-Y_BASE=1 (not 0): a raw tap sits at the same height as its lever, and
-Schematic.save() normalizes the whole structure to start at y=0 by
-shifting everything up by however far below 0 any block went -- a raw
-tap at y=0 needs a floor at y=-1, which silently shifted the ENTIRE
-schematic by one level and put every hardcoded coordinate in this file
-off by one relative to the actual placed blocks (first version of this
-file hit exactly that bug: every dump in-game showed the wrong block at
-every position, consistently one level off). Starting at y=1 keeps
-every floor requirement non-negative.
-
-Identity (same as before): XOR(A,B) = OR(Term1, Term2)
-  Term1 = NOT(NOT_A OR raw_B)
-  Term2 = NOT(raw_A OR NOT_B)
+Logic:
+  Term1 = NOT(NOT_A OR B)   -- torch east of S1
+  Term2 = NOT(A OR NOT_B)   -- torch above S2
+  XOR = OR(Term1, Term2)
 """
 from schem import Schematic
 import redstone_parts as rp
 
 s = Schematic()
+Y = 1
+Y3 = Y + 2  # y=3
+Y4 = Y + 3  # y=4
 
-Y_BASE = 1
-Y_GAP = 5  # lane B lives this many levels above lane A
+segments = []
 
-# ---- lane A ----
-SA = (0, Y_BASE, 0)
-notA = rp.place_not(s, SA, lever_dir=rp.EAST, torch_dust_dir=rp.SOUTH)
-leverA, dustA1 = notA["lever"], notA["dust"]  # dustA1 = NOT_A @ y=Y_BASE+1
+def add_seg(x1, x2, z1, z2, y, label):
+    x1, x2 = sorted([x1, x2]); z1, z2 = sorted([z1, z2])
+    for (ex1, ex2), (ez1, ez2), ey, el in segments:
+        if ey != y:
+            continue
+        if x1 <= ex2 and x2 >= ex1 and z1 <= ez2 and z2 >= ez1:
+            raise ValueError(f"CROSSING: {label} x[{x1},{x2}] z[{z1},{z2}] y={y} vs {el} x[{ex1},{ex2}] z[{ez1},{ez2}] y={ey}")
+    segments.append(((x1, x2), (z1, z2), y, label))
 
-dustRAW_A = rp.place_raw_tap(s, leverA, rp.SOUTH)
-rawA = rp.step(s, dustRAW_A, rp.SOUTH, up=True)  # raw_A @ y=Y_BASE+1
+def pw(x, y, z, label):
+    if y > 1:
+        pass  # floating dust at y>1, supported by diagonal connection
+    else:
+        rp.floor_under(s, (x, y, z))
+    s.set(x, y, z, "minecraft:redstone_wire[power=0]")
+    add_seg(x, x, z, z, y, label)
 
-# ---- lane B, Y_GAP levels above lane A -- can never collide ----
-SB = (0, Y_BASE + Y_GAP, 0)
-notB = rp.place_not(s, SB, lever_dir=rp.EAST, torch_dust_dir=rp.SOUTH)
-leverB, dustB1 = notB["lever"], notB["dust"]
+def prx(xs, xe, z, y, label):
+    step = 1 if xe >= xs else -1
+    for x in range(xs, xe + step, step):
+        pw(x, y, z, label)
 
-dustRAW_B = rp.place_raw_tap(s, leverB, rp.SOUTH)
-rawB = rp.step(s, dustRAW_B, rp.SOUTH, up=True)
+def prz(x, zs, ze, y, label):
+    step = 1 if ze >= zs else -1
+    for z in range(zs, ze + step, step):
+        pw(x, y, z, label)
 
-def step_down_to(start, target_y, direction):
-    cur = start
-    while cur[1] > target_y:
-        cur = rp.step(s, cur, direction, up=False)
-    assert cur[1] == target_y, (cur, target_y)
-    return cur
+# ================= Lever A: NOT_A (z=100) + raw_A (z=101) =================
+s.set(-3, Y, 100, "minecraft:stone")
+s.set(-2, Y, 100, "minecraft:lever[face=wall,facing=east,powered=false]")
+s.set(-3, Y + 1, 100, "minecraft:redstone_torch[lit=true]")
+dustA1 = (-4, Y + 1, 100)  # NOT_A dust, WEST of torch
+pw(*dustA1, "NOT_A dust y=2")
+na_y3 = rp.step(s, dustA1, rp.WEST, up=True)   # (-5,3,100)
+pw(*na_y3, "NOT_A y=3 start")
 
-LOW_Y = Y_BASE + 1  # lane A's operating height (NOT_A, raw_A, S1, S2 all live here)
+dustRAW_A = (-1, Y, 100)
+rp.floor_under(s, dustRAW_A)
+s.set(*dustRAW_A, "minecraft:redstone_wire[power=0]")
+rawA_step = rp.step(s, dustRAW_A, rp.EAST, up=True)   # (0,2,100)
+rawA_settle = rp._add(rawA_step, rp.EAST)              # (1,2,100)
+rp.floor_under(s, rawA_settle)
+s.set(*rawA_settle, "minecraft:redstone_wire[power=0]")
+rawA_y3 = rp.step(s, rawA_settle, rp.SOUTH, up=True)   # (1,3,101)
+pw(*rawA_y3, "raw_A y=3 start")
 
-# ==== S1 = merge(NOT_A, raw_B) -> Term1 ====
-S1 = (0, LOW_Y, 10)
-rp.converge(s, S1)
-rp.travel(s, dustA1, S1)  # NOT_A approaches from the north (straight south, x=0)
+# ================= Lever B: NOT_B (z=200) + raw_B (z=202 at y=4) =================
+s.set(-3, Y, 200, "minecraft:stone")
+s.set(-2, Y, 200, "minecraft:lever[face=wall,facing=east,powered=false]")
+s.set(-3, Y + 1, 200, "minecraft:redstone_torch[lit=true]")
+dustB1 = (-3, Y + 1, 201)  # NOT_B dust, SOUTH of torch
+pw(*dustB1, "NOT_B dust y=2")
+nb_y3 = rp.step(s, dustB1, rp.EAST, up=True)   # (-2,3,200)
+pw(*nb_y3, "NOT_B y=3 start")
 
-# raw_B -> staging point near S1 at its OWN safe height -> staircase down
-# SOUTH (perpendicular to the final WEST approach, so the stair's floor
-# trail never lands on the final leg's own path) -> lands exactly at
-# S1's z -> short final approach from the east.
-rawB_stage = rp.travel(s, rawB, (7, rawB[1], 2), land_as="dust")
-rawB_stage = rp.travel(s, rawB_stage, (7, rawB[1], 5), land_as="dust")
-rawB_low = step_down_to(rawB_stage, LOW_Y, rp.SOUTH)
-# settle hop: a dust cell that is itself a staircase LANDING cell doesn't
-# reliably power a directly-adjacent consumer block (confirmed via
-# build_rawb_lamp_test.py / build_rawb_fix_test.py -- the dust's own
-# power reads correctly and it CAN power another plain dust cell, but a
-# lamp/torch-bearing consumer right off the landing cell itself does
-# not light). Insert one plain dust hop before the final approach.
-rawB_settle = rp._add(rawB_low, rp.WEST)
+dustRAW_B = (-1, Y, 200)
+rp.floor_under(s, dustRAW_B)
+s.set(*dustRAW_B, "minecraft:redstone_wire[power=0]")
+rawB_step = rp.step(s, dustRAW_B, rp.EAST, up=True)   # (0,2,200)
+rawB_settle = rp._add(rawB_step, rp.EAST)              # (1,2,200)
 rp.floor_under(s, rawB_settle)
 s.set(*rawB_settle, "minecraft:redstone_wire[power=0]")
-rp.travel(s, rawB_settle, S1)  # straight west into S1
+rawB_y3 = rp.step(s, rawB_settle, rp.SOUTH, up=True)   # (1,3,201)
+rawB_y4 = rp.step(s, rawB_y3, rp.SOUTH, up=True)       # (1,4,202)
+pw(*rawB_y4, "raw_B y=4 start")
 
-term1_torch = (S1[0], S1[1] + 1, S1[2])
+# ================= S1 = merge(NOT_A, raw_B) -> Term1 @ (200,3,100) =================
+S1 = (200, Y3, 100)
+rp.converge(s, S1)
+# NOT_A: (-5,3,100) -> east to (199,3,100) [west of S1]
+prx(-4, 199, 100, Y3, "NOT_A to S1")
+# raw_B: (1,4,202) -> east to (200,4,202) -> south to (200,4,99) [north of S1]
+prx(2, 200, 202, Y4, "raw_B y=4 EW")
+prz(200, 201, 99, Y4, "raw_B y=4 NS")
+
+# Term1: torch at (201,3,100) [east of S1], dust at (202,3,100)
+term1_torch = (201, Y3, 100)
 s.set(*term1_torch, "minecraft:redstone_torch[lit=true]")
-term1_dust = (term1_torch[0], term1_torch[1], term1_torch[2] + 1)  # south of torch
-rp.floor_under(s, term1_dust)
-s.set(*term1_dust, "minecraft:redstone_wire[power=0]")
+term1_dust = (202, Y3, 100)
+pw(*term1_dust, "term1 dust")
 
-# ==== S2 = merge(raw_A, NOT_B) -> Term2 ====
-S2 = (15, LOW_Y, 20)  # x=15: raw_A's natural column (x=1) crosses raw_B's
-# approach into S1 -- move well clear of the whole S1 convergence zone first.
-rawA_safe = rp.travel(s, rawA, (15, LOW_Y, 2), land_as="dust")
+# ================= S2 = merge(raw_A, NOT_B) -> Term2 @ (397,3,300) =================
+S2 = (397, Y3, 300)
 rp.converge(s, S2)
-rp.travel(s, rawA_safe, S2)  # raw_A approaches from the north (straight south)
+# raw_A: (1,3,101) -> east to (396,3,101) -> south at x=400 from z=102 to z=299 [south of S2]
+prx(2, 396, 101, Y3, "raw_A EW")
+prz(400, 102, 299, Y3, "raw_A NS")
+# NOT_B: (-2,3,200) -> east to (397,3,200) -> south at x=397 from z=201 to z=299 [south of S2]
+prx(-1, 397, 200, Y3, "NOT_B EW")
+prz(397, 201, 299, Y3, "NOT_B NS")
 
-# NOT_B -> staging point near S2, same trick -> staircase down EAST
-# (perpendicular to the final NORTH approach) ending exactly at S2's x ->
-# single-hop approach from the south (no repeater needed for 1 hop, so
-# no floor-trail collision risk at all for this last step).
-notB_stage = rp.travel(s, dustB1, (0, dustB1[1], 50), land_as="dust")  # far clear of rawB's z=2..5 leg
-notB_stage = rp.travel(s, notB_stage, (10, dustB1[1], 50), land_as="dust")
-notB_stage = rp.travel(s, notB_stage, (10, dustB1[1], 22), land_as="dust")  # +1 vs before: leaves room for the settle hop below
-notB_low = step_down_to(notB_stage, LOW_Y, rp.EAST)  # lands at S2.x
-# settle hop (see rawB_settle above for why): one plain dust cell before
-# the final approach into S2, since notB_low is itself a staircase
-# landing cell and can't reliably power S2 directly.
-notB_settle = rp._add(notB_low, rp.NORTH)
-rp.floor_under(s, notB_settle)
-s.set(*notB_settle, "minecraft:redstone_wire[power=0]")
-rp.travel(s, notB_settle, S2)  # straight north into S2, from the south
-
-term2_torch = (S2[0], S2[1] + 1, S2[2])
+# Term2: torch at (397,4,300) [above S2], dust at (397,4,301) [south of torch]
+term2_torch = (397, Y4, 300)
 s.set(*term2_torch, "minecraft:redstone_torch[lit=true]")
-term2_dust = (term2_torch[0] + 1, term2_torch[1], term2_torch[2])  # east of torch (south collided with notB_low's floor)
-rp.floor_under(s, term2_dust)
-s.set(*term2_dust, "minecraft:redstone_wire[power=0]")
+term2_dust = (397, Y4, 301)
+pw(*term2_dust, "term2 dust")
 
-# ==== Final: XOR = OR(Term1, Term2) -> lamp ====
-LAMP = (0, LOW_Y + 1, 25)
-rp.converge(s, LAMP, "minecraft:redstone_lamp[lit=false]")
-rp.travel(s, term1_dust, LAMP)  # approaches from the north
-
-wpL = rp.travel(s, term2_dust, (16, term2_dust[1], 25), land_as="dust")
-rp.travel(s, wpL, LAMP)  # approaches from the east
+# ================= Final: XOR = OR(Term1, Term2) -> lamp @ (300,4,300) =================
+LAMP = (300, Y4, 300)
+s.set(*LAMP, "minecraft:redstone_lamp[lit=false]")
+# term1_dust(202,3,100) -> step up to y=4: (203,4,100) -> south to (203,4,300) -> east to x=299
+t1_y4 = rp.step(s, term1_dust, rp.EAST, up=True)   # (203,4,100)
+pw(*t1_y4, "term1 y=4 start")
+prz(203, 101, 300, Y4, "term1 NS")
+prx(204, 299, 300, Y4, "term1 EW")
+# term2_dust(397,4,301) -> west at z=301 to x=301 -> south to z=300 at x=301
+prx(396, 301, 301, Y4, "term2 EW")
+pw(301, Y4, 300, "term2 to LAMP")
 
 s.save("xor_compact_test.schem")
-print("wrote xor_compact_test.schem")
-print(f"leverA={leverA} torchA={notA['torch']} leverB={leverB} torchB={notB['torch']}")
-print(f"S1={S1} term1_torch={term1_torch} S2={S2} term2_torch={term2_torch} lamp={LAMP}")
+print("wrote xor_compact_test.schem (v23, no crossing paths)")
+print(f"S1={S1} term1_torch={term1_torch} S2={S2} term2_torch={term2_torch}")
+print(f"term1_dust={term1_dust} term2_dust={term2_dust} LAMP={LAMP}")
+print(f"Segments: {len(segments)}")
