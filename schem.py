@@ -31,7 +31,15 @@ class Schematic:
         self.blocks = {}
 
     def set(self, x, y, z, block_str):
-        self.blocks[(x, y, z)] = block_str
+        key = (x, y, z)
+        existing = self.blocks.get(key)
+        if existing is not None and existing != block_str:
+            raise ValueError(
+                f"collision at {key}: tried to place {block_str!r} but "
+                f"{existing!r} is already there (two parts of the circuit "
+                f"overlap -- check the layout)"
+            )
+        self.blocks[key] = block_str
 
     def save(self, path, data_version=3700):
         if not self.blocks:
