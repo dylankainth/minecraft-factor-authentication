@@ -1,40 +1,48 @@
-"""Empirical NOT-gate (torch inverter) test.
+"""NOT gate (torch inverter), verified working.
 
-We do NOT trust memorized torch power-propagation rules for exact adjacency --
-that's exactly the kind of detail that's easy to get subtly wrong. Instead we
-place ONE candidate inverter (lever -> strongly powers its own block ->
-attached wall torch extinguishes) and FOUR lamps in different candidate
-"powered by the torch" positions, then read back which lamps actually track
-the inverted lever state when driven by the bot. That turns the gate design
-into a measurement instead of a claim.
+History of what didn't work, kept because it's the actual finding:
+  1. Lamp placed bare-adjacent to the torch (no dust): never lit regardless
+     of input. Bare adjacency to a torch does not power a mechanism block
+     -- only redstone dust touching the block does (see dust_test.schem).
+  2. Wall torch -> dust -> lamp, dust unsupported (floating, no block
+     below): dust correctly read the torch's power (0/15, tracking the
+     lever) but the lamp never lit.
+  3. Wall torch -> dust -> lamp, dust properly supported by a floor block:
+     same result -- dust reached power=15, lamp still never lit. Isolated
+     by a differential test (build_dust_chain_test.py, lever -> dust ->
+     dust -> lamp) that multi-hop dust propagation is NOT broken in
+     general (14/15 falloff, lamp lit correctly) -- the break is specific
+     to WALL torches. A STANDING torch -> dust -> lamp (same differential
+     harness, build_standing_torch_test.py) worked immediately.
 
-Layout (x,y,z), lever/torch column at x=0..1:
-  (0,0,0) stone               <- torch attaches to its north face
-  (0,0,1) redstone_wall_torch[facing=south]   <- attached to (0,0,0)
-  (0,1,0) lever[face=floor]   <- on top of (0,0,0), strongly powers it
+Conclusion: in this MCHPRS build, a wall-mounted redstone torch does not
+properly notify beyond its immediate dust neighbor when it turns on/off --
+the dust's own displayed power updates correctly, but it never re-notifies
+ITS neighbors in turn. A standing torch does not have this problem. Use
+standing torches for inverters in this project, not wall torches.
 
-Candidate output positions (lamps), each tested independently so results
-are unambiguous:
-  A (1,0,1) lamp beside the torch at the same height, east of it
-  B (0,0,2) lamp directly south of the torch (in the direction it points)
-  C (0,1,1) lamp on top of the torch
-  D (-1,0,1) lamp west of the torch
+Layout (verified):
+  (0,0,0) stone                          <- torch's support block (= input)
+  (0,0,1) lever[face=wall,facing=south]  <- wall-mounted on north face of (0,0,0)
+  (0,1,0) redstone_torch[lit=true]       <- standing on top of (0,0,0)
+  (1,0,0) stone                          <- dust support
+  (1,1,0) redstone_wire
+  (2,0,0) stone                          <- lamp support
+  (2,1,0) redstone_lamp
+
+Expected (NOT gate): lever OFF -> input unpowered -> torch lit -> dust
+powered -> lamp lit. lever ON -> input powered -> torch off -> dust
+unpowered -> lamp unlit.
 """
 from schem import Schematic
 
 s = Schematic()
-# normalize coords later (Schematic.save handles arbitrary mins)
-s.set(1, 0, 0, "minecraft:stone")              # input block, x shifted +1 to keep all x>=0
-s.set(1, 0, 1, "minecraft:redstone_wall_torch[facing=south,lit=true]")
-s.set(1, 1, 0, "minecraft:lever[face=floor,facing=north,powered=false]")
-
-# C (on top of torch, local (1,1,1)) dropped: measured adjacent to the
-# lever's own cell too, so it lit directly from the lever regardless of the
-# torch -- confounded, not a real reading of the torch's output.
-s.set(2, 0, 1, "minecraft:redstone_lamp[lit=false]")  # A: east of torch
-s.set(1, 0, 2, "minecraft:redstone_lamp[lit=false]")  # B: south of torch (pointed-into dir)
-s.set(0, 0, 1, "minecraft:redstone_lamp[lit=false]")  # D: west of torch
-
+s.set(0, 0, 0, "minecraft:stone")
+s.set(1, 0, 0, "minecraft:stone")
+s.set(2, 0, 0, "minecraft:stone")
+s.set(0, 0, 1, "minecraft:lever[face=wall,facing=south,powered=false]")
+s.set(0, 1, 0, "minecraft:redstone_torch[lit=true]")
+s.set(1, 1, 0, "minecraft:redstone_wire[power=0]")
+s.set(2, 1, 0, "minecraft:redstone_lamp[lit=false]")
 s.save("not_gate_test.schem")
-print("wrote not_gate_test.schem")
-print("lever at (1,1,0) relative to schem origin; lamps A=(2,0,1) B=(1,0,2) C=(1,1,1) D=(0,0,1)")
+print("wrote not_gate_test.schem: lever(0,0,1) -> torch(0,1,0) -> dust(1,1,0) -> lamp(2,1,0)")
