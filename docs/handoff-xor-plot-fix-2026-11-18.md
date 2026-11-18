@@ -76,6 +76,8 @@ Found that `schem.py`'s `WEOffsetX/Y/Z` (always 0 before tonight) controls which
 
 **This is the real finding, and it supersedes the "fix" above**: the behavior is genuinely non-deterministic run-to-run, with identical inputs, not reliably explained by anchor distance, dust density, paste size, toggling, or any other variable tested tonight. The center-handle change is still worth keeping (it can only help, and costs nothing), but it is not a fix -- don't rely on it, and don't be fooled by a single successful run the way this session briefly was.
 
+**Empirical success rate sample**: ran the identical `xor_v2_retry_probe.js` script six times total tonight (same schematic, same server, no code changes between runs). 1 succeeded (10/10 reads correct), 5 failed (10/10 reads wrong). That's roughly 1-in-6 -- "just retry until it works" is not a practical workaround at that rate; a future session would need either a real fix or a much cheaper way to detect success/failure than a full paste-and-poll cycle before retrying is worthwhile.
+
 ## Recommended next steps
 
 1. **Stop chasing this specific bug.** Nine-plus isolation tests tonight (chunk distance, plot clipping, command races, reconnect, dust density, paste size, redpiler, pre-visit-before-paste, and the center-handle offset) have all either been ruled out or, in the center-handle case, shown to be a one-run coincidence rather than a real fix. The behavior is genuinely non-deterministic across identical runs. Further live-read debugging from here has a poor effort/information ratio.
