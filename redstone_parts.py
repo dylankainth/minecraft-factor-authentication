@@ -13,6 +13,35 @@ bug that's already been fixed once:
     no "merge dust" helper here on purpose; `converge` aims N repeaters
     directly at one consumer block instead.
   - every dust/repeater cell gets a floor block under it automatically.
+  - plain redstone dust decays to 0 power after 15 blocks with nothing
+    to refresh it -- `travel()` already handles this correctly (one
+    repeater per hop, every single block), so prefer it over hand-rolled
+    long dust runs. A 2026-11-18 session found this the hard way: a
+    first compact XOR attempt ran raw dust 20-30 blocks with a single
+    repeater only at the very end, and nothing downstream of that run
+    ever received power at all (confirmed live -- lever-adjacent
+    torches inverted correctly, everything past the long run never
+    moved, in any input state). See
+    docs/handoff-xor-plot-fix-2026-11-18.md.
+  - MCHPRS plots are 512x512 blocks; `//paste` silently drops anything
+    that falls outside the plot the paste command's anchor is in -- no
+    error, no message, just air (confirmed by reading
+    mchprs/crates/core/src/plot/mod.rs directly). Keep every build's
+    full bounding box comfortably inside one plot, away from any
+    multiple of 512 in x or z.
+  - a live read-reliability bug remains OPEN and unexplained as of
+    2026-11-18: in large (3000+ block) pastes, long runs of plain dust
+    cells sometimes read back as air through mineflayer even when the
+    repeaters and torches around them read correctly and a much
+    smaller/simpler test with the identical convergence geometry reads
+    fine. Ruled out: chunk-loading distance, plot-boundary clipping,
+    command-completion races, client reconnect/cache staleness, raw
+    paste size alone (a 6415-block padded isolation test read
+    correctly), and auto_redpiler (confirmed off by default, and
+    toggling it didn't change the result). Not yet explained. Treat any
+    single live truth-table read with suspicion on a large build --
+    corroborate with a direct, repeated block scan before trusting a
+    "doesn't work" result enough to redesign the circuit.
 
 Directions are unit vectors (dx,0,dz) or (0,dy,0); only horizontal
 (dx,dz) directions are used for the travel axis of a wire/repeater run.
