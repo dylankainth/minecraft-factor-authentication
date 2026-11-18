@@ -262,7 +262,12 @@ if problems:
     raise SystemExit(1)
 
 print("No adjacency problems.")
-s.save("xor_compact_v2.schem")
+xs = [p[0] for p in s.blocks]
+ys = [p[1] for p in s.blocks]
+zs = [p[2] for p in s.blocks]
+HANDLE = ((min(xs) + max(xs)) // 2, (min(ys) + max(ys)) // 2, (min(zs) + max(zs)) // 2)
+print(f"bbox x:{min(xs)}-{max(xs)} y:{min(ys)}-{max(ys)} z:{min(zs)}-{max(zs)} HANDLE(local)={HANDLE}")
+s.save("xor_compact_v2.schem", we_offset=(-HANDLE[0], -HANDLE[1], -HANDLE[2]))
 print("wrote xor_compact_v2.schem")
 print(f"leverA={leverA} leverB={leverB}")
 print(f"S1={S1} S2={S2} term1_torch={term1_torch} term2_torch={term2_torch} LAMP={LAMP}")

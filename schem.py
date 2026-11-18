@@ -41,7 +41,18 @@ class Schematic:
             )
         self.blocks[key] = block_str
 
-    def save(self, path, data_version=3700):
+    def save(self, path, data_version=3700, we_offset=(0, 0, 0)):
+        """we_offset: WEOffsetX/Y/Z, the WorldEdit clipboard "handle" --
+        the local point (relative to the structure's own min corner)
+        that lands exactly on the player's position at paste time.
+        Confirmed from mchprs/crates/schematic/src/lib.rs: the loader
+        negates WEOffset into cb.offset_x, and execute_paste computes
+        world_offset = player_pos + WEOffset, so passing (0,0,0) (the
+        default) anchors on the structure's corner -- pass the
+        structure's own center here instead to roughly halve the
+        worst-case distance from the player's paste position to any
+        block, which 2026-11-18's investigation suggests matters for
+        live-read reliability on larger builds."""
         if not self.blocks:
             raise ValueError("no blocks set")
         xs = [p[0] for p in self.blocks]
@@ -72,9 +83,9 @@ class Schematic:
             "BlockData": ByteArray(list((b if b < 128 else b - 256) for b in data)),
             "BlockEntities": List[Compound]([]),
             "Metadata": Compound({
-                "WEOffsetX": Int(0),
-                "WEOffsetY": Int(0),
-                "WEOffsetZ": Int(0),
+                "WEOffsetX": Int(we_offset[0]),
+                "WEOffsetY": Int(we_offset[1]),
+                "WEOffsetZ": Int(we_offset[2]),
             }),
             "Version": Int(2),
             "DataVersion": Int(data_version),

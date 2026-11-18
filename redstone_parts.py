@@ -30,18 +30,28 @@ bug that's already been fixed once:
     full bounding box comfortably inside one plot, away from any
     multiple of 512 in x or z.
   - a live read-reliability bug remains OPEN and unexplained as of
-    2026-11-18: in large (3000+ block) pastes, long runs of plain dust
-    cells sometimes read back as air through mineflayer even when the
-    repeaters and torches around them read correctly and a much
-    smaller/simpler test with the identical convergence geometry reads
-    fine. Ruled out: chunk-loading distance, plot-boundary clipping,
+    2026-11-18: on a large (3000+ block) paste, some blocks far from the
+    paste anchor sometimes read back as air through mineflayer, even
+    when their immediate neighbors (repeaters, torches) read correctly
+    and a much smaller/simpler test with identical content reads fine.
+    Confirmed genuinely non-deterministic: the exact same script,
+    schematic, and server state passed 10/10 reads on one run and
+    failed 10/10 on the very next run with no code change at all.
+    Ruled out: chunk-loading distance, plot-boundary clipping,
     command-completion races, client reconnect/cache staleness, raw
     paste size alone (a 6415-block padded isolation test read
-    correctly), and auto_redpiler (confirmed off by default, and
-    toggling it didn't change the result). Not yet explained. Treat any
-    single live truth-table read with suspicion on a large build --
-    corroborate with a direct, repeated block scan before trusting a
-    "doesn't work" result enough to redesign the circuit.
+    correctly 5/5), auto_redpiler (confirmed off by default, toggling
+    didn't change it), and dust-vs-repeater density (a one-repeater-
+    per-block rebuild failed identically to the every-8-blocks one).
+    `Schematic.save()`'s `we_offset` param (anchor the paste on the
+    structure's own center instead of its corner, roughly halving
+    worst-case anchor-to-block distance) looked like a fix on its first
+    test and was NOT on a repeat run -- keep using it anyway (free,
+    can't hurt) but do not treat it as resolving this. Treat any single
+    live truth-table read on a build this size with suspicion --
+    corroborate with a direct, repeated block scan, and expect to need
+    more than one attempt. See docs/handoff-xor-plot-fix-2026-11-18.md
+    for the full investigation.
 
 Directions are unit vectors (dx,0,dz) or (0,dy,0); only horizontal
 (dx,dz) directions are used for the travel axis of a wire/repeater run.

@@ -61,11 +61,27 @@ Continued investigating after the first draft of this doc. In order:
 
 `redstone_parts.py` has been updated with all of the above as permanent documentation, including a strong recommendation to prefer the existing `travel()` helper (one repeater per hop, not every-8-blocks) for new work, and a warning to corroborate any single "live read says it's broken" result with a direct scan before trusting it enough to redesign a circuit.
 
+## Two more tests, both negative
+
+- **AND gate regression check**: reran the already-proven `and_gate_probe.js` against the live server tonight, unrelated to the XOR work, just to confirm the server/tooling baseline is still sound. **Full pass** -- `SF` (its own 2-repeater convergence stone block, 3 blocks from its paste anchor) read correctly as `stone` on every single check across the whole truth table, and `LAMP_F` correctly lit after a real transition. This reinforces that the bug is specific to large/far builds, not a general regression in the server or tooling.
+- **Pre-visit-before-paste**: tried flying to S1/S2/LAMP's positions *before* issuing `//load`/`//paste` (theory: chunk sections far from wherever the player stands at paste time might not be server-side "active" yet, so the write itself could silently drop, and no amount of flying there afterward to read would fix a write that never landed). **Did not help** -- identical air-on-every-attempt result.
+
+So the strongest honest statement this session can make: **AND/OR/NOT gates, close to their paste anchor, are rock solid. The XOR's own convergence points, far down a long routing chain, consistently fail to read back despite the underlying wiring being visibly correct in a direct scan.** Every mechanism tried to explain or fix this (distance-at-read-time, distance-at-paste-time, dust density, paste size, reconnect, redpiler) has been ruled out. The actual mechanism remains unknown.
+
+## A promising fix that turned out to be a coincidence -- important correction
+
+Found that `schem.py`'s `WEOffsetX/Y/Z` (always 0 before tonight) controls which *local* point in the clipboard lands on the player's position at paste time (confirmed by reading `mchprs/crates/schematic/src/lib.rs`'s `execute_paste`/`load_schematic_sponge`: `cb.offset_x = -WEOffsetX`, and the paste computes `world_offset = player_pos + WEOffset`). Since the corner-anchored XOR put S1/S2/LAMP 18-30 blocks from the paste position, setting `WEOffsetX/Y/Z` to the structure's own center (local `(16,2,10)`) roughly halves that worst-case distance for every block.
+
+**First test of this fix: a clean pass.** `xor_v2_retry_probe.js`, rerun with the center handle, read S1/S2/LAMP correctly as `stone`/`stone`/`redstone_lamp` on all 10 attempts over 10 seconds. The full truth-table probe (`xor_compact_v2_probe.js`), updated the same way, was run next and failed again (S1/S2 air throughout, even in the very first pre-toggle read). **Re-running the exact same `xor_v2_retry_probe.js` script a second time -- same schematic, same anchor, same code, zero changes -- failed completely on every attempt**, where the first run had succeeded on every attempt.
+
+**This is the real finding, and it supersedes the "fix" above**: the behavior is genuinely non-deterministic run-to-run, with identical inputs, not reliably explained by anchor distance, dust density, paste size, toggling, or any other variable tested tonight. The center-handle change is still worth keeping (it can only help, and costs nothing), but it is not a fix -- don't rely on it, and don't be fooled by a single successful run the way this session briefly was.
+
 ## Recommended next steps
 
-1. **Don't sink more time into the live-read bug directly** -- diminishing returns after this session's investigation. Instead, treat "the schematic/collision/adjacency checks pass offline" as the primary correctness signal for now, and use direct block scans (not single-point `blockAt` calls) as the secondary one when a live check is wanted.
-2. If a future session wants to chase this further: the dust-vs-repeater distinction above is the strongest lead. Try a schematic that's ALL repeaters (one per block, like `travel()` already does) with zero plain-dust runs longer than 1 cell, and see if the read-reliability problem disappears entirely.
-3. Per `CLAUDE.md`'s suggested path: build a 1-bit full adder next, using `travel()` (not hand-rolled dust runs) for all routing to sidestep both the signal-decay bug and, possibly, this read-reliability bug at the same time.
+1. **Stop chasing this specific bug.** Nine-plus isolation tests tonight (chunk distance, plot clipping, command races, reconnect, dust density, paste size, redpiler, pre-visit-before-paste, and the center-handle offset) have all either been ruled out or, in the center-handle case, shown to be a one-run coincidence rather than a real fix. The behavior is genuinely non-deterministic across identical runs. Further live-read debugging from here has a poor effort/information ratio.
+2. **Treat the offline collision/adjacency checks as the primary correctness signal for new builds.** A schematic that passes `build_xor_compact_v2.py`'s own `check_adjacency()` and has zero `Schematic.set()` collisions is strong evidence of correctness independent of whatever's wrong with live reads. Corroborate with a direct, multi-point block scan (not a single `blockAt` call) when a live check is wanted, and expect it to sometimes need a second attempt.
+3. Keep the center-handle `WEOffset` change in `schem.py`/`build_xor_compact_v2.py` going forward -- it's free and can only help, even though it didn't prove to be a reliable fix on its own.
+4. Per `CLAUDE.md`'s suggested path: build a 1-bit full adder next, using `travel()` (not hand-rolled dust runs) for all routing. Budget for live verification being unreliable rather than planning around it working first try.
 
 ## Definition of done (still not met)
 

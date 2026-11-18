@@ -37,11 +37,17 @@ function chatAndWait(cmd, matchSubstr, timeoutMs = 20000) {
   });
 }
 
+// build_xor_compact_v2.py now sets WEOffset to the structure's own
+// center (local (16,2,10)) -- the player's paste-time position maps to
+// THAT local point, not the corner, so every PTS offset below is
+// (build_local - HANDLE) instead of build_local directly.
 const ANCHOR = new Vec3(600, 70, 600);
+const HANDLE = { x: 16, y: 2, z: 10 };
+const rel = (x, y, z) => ANCHOR.offset(x - HANDLE.x, y - HANDLE.y, z - HANDLE.z);
 const PTS = {
-  S1: ANCHOR.offset(18, 2, 8),
-  S2: ANCHOR.offset(30, 1, 4),
-  LAMP: ANCHOR.offset(22, 2, 9),
+  S1: rel(18, 2, 8),
+  S2: rel(30, 1, 4),
+  LAMP: rel(22, 2, 9),
 };
 
 bot.once("login", async () => {
@@ -51,14 +57,11 @@ bot.once("login", async () => {
   await sleep(500);
   bot.chat("/rtps unlimited");
   await sleep(500);
-  // Theory: auto_redpiler (MCHPRS's JIT redstone compiler, which
-  // auto-activates under /rtps unlimited on complex-enough circuits) may
-  // not sync internal compiled-graph node states back to the real chunk
-  // data every tick -- that would exactly explain "deep merge points
-  // read as air forever, but lever-adjacent IO blocks always update
-  // fine" without it being a schematic or wiring bug at all.
-  bot.chat("/toggleautorp");
-  await sleep(500);
+  // (auto_redpiler and pre-visiting-far-points-before-paste theories
+  // both tested and ruled out -- see docs/handoff-xor-plot-fix-2026-11-18.md.
+  // This run tests the center-handle WEOffset fix instead: ANCHOR is
+  // now where the structure's CENTER lands, not its corner, roughly
+  // halving the worst-case distance from paste position to S1/S2/LAMP.)
   await bot.creative.flyTo(ANCHOR);
 
   await chatAndWait("//load xor_compact_v2.schem", "loaded to your clipboard");

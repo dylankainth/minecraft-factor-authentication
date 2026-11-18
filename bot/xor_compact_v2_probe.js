@@ -44,17 +44,25 @@ function chatAndWait(cmd, matchSubstr, timeoutMs = 20000) {
 // (500,70,500) had everything past world-x=512 silently dropped, lining
 // up exactly with the server's own "Entering plot (1,0)" message. Keep
 // well clear of any multiple of 512 in both axes.
+// build_xor_compact_v2.py sets WEOffset to the structure's own center
+// (local (16,2,10)) -- confirmed live (2026-11-18) to fix a real
+// read-reliability bug where blocks far from the player's paste-time
+// position read back as air. The player's position now maps to local
+// HANDLE, not local (0,0,0), so every PTS offset is (build_local -
+// HANDLE) instead of build_local directly.
 const ANCHOR = new Vec3(600, 70, 600);
+const HANDLE = { x: 16, y: 2, z: 10 };
+const rel = (x, y, z) => ANCHOR.offset(x - HANDLE.x, y - HANDLE.y, z - HANDLE.z);
 const PTS = {
-  LEVER_A: ANCHOR.offset(0, 1, 0),
-  LEVER_B: ANCHOR.offset(0, 1, 20),
-  TORCH_A: ANCHOR.offset(1, 2, 0),
-  TORCH_B: ANCHOR.offset(1, 2, 20),
-  S1: ANCHOR.offset(18, 2, 8),
-  TERM1_TORCH: ANCHOR.offset(18, 3, 8),
-  S2: ANCHOR.offset(30, 1, 4),
-  TERM2_TORCH: ANCHOR.offset(30, 2, 4),
-  LAMP: ANCHOR.offset(22, 2, 9),
+  LEVER_A: rel(0, 1, 0),
+  LEVER_B: rel(0, 1, 20),
+  TORCH_A: rel(1, 2, 0),
+  TORCH_B: rel(1, 2, 20),
+  S1: rel(18, 2, 8),
+  TERM1_TORCH: rel(18, 3, 8),
+  S2: rel(30, 1, 4),
+  TERM2_TORCH: rel(30, 2, 4),
+  LAMP: rel(22, 2, 9),
 };
 
 async function dump(label, pos) {
