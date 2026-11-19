@@ -2,6 +2,15 @@
 // Only variable input is the 32-bit time-step counter. Two SHA-1 compressions
 // (inner: S_in + block(counter), outer: S_out + block(H)) then truncate/mod 10^6.
 // Mirrors ref.py/datapath.py/netlist.py's already RFC-vector-verified design.
+//
+// Two optimizations over the first working version (see README.md "Optimizing it"):
+//   1. No separate `block_mem` register -- for the first 16 rounds, `sched` is a pure
+//      rotation of the initial block words, so `sched[0]` already equals what
+//      `block_mem[round]` used to hold. Saves 512 flip-flops (16 words x 32 bits).
+//   2. `e + K[round] + w` for the NEXT round is computed and registered one cycle
+//      ahead (into `ekw_reg`), so each round's critical add is just
+//      `rol5(a) + f + ekw_reg` (2 levels) instead of `rol5(a) + f + e + K + w`
+//      (4 sequential 32-bit adds) -- this is the classic SHA-1 round-pipelining trick.
 module main(
     input clk,
     input rst,
@@ -21,8 +30,8 @@ module main(
     reg [6:0] round;
 
     reg [31:0] a, b, c, d, e;
-    reg [31:0] block_mem [0:15];
     reg [31:0] sched [0:15];
+    reg [31:0] ekw_reg; // e + K[round] + w for the CURRENT round, computed last cycle
     reg [31:0] h0, h1, h2, h3, h4;   // saved after first feed-forward
     reg [31:0] dg0, dg1, dg2, dg3, dg4; // final digest words (big-endian H0..H4)
     reg [19:0] code_r;
@@ -61,10 +70,21 @@ module main(
         end
     endfunction
 
-    wire [31:0] w_cur = (round < 16) ? block_mem[round]
+    // This round's work: only 2 sequential adds on the critical path.
+    wire [31:0] w_cur = (round < 16) ? sched[0]
                        : rol(sched[13] ^ sched[8] ^ sched[2] ^ sched[0], 1);
     wire [31:0] f_cur = f_fn(b, c, d, round);
-    wire [31:0] sum_cur = rol(a, 5) + f_cur + e + k_fn(round) + w_cur;
+    wire [31:0] sum_cur = rol(a, 5) + f_cur + ekw_reg;
+
+    // Next round's e + K + w, computed now (in parallel with sum_cur, off the
+    // critical path) and registered for next cycle's use. next_e is just d
+    // (the value e will hold next cycle); next_w looks at what `sched` will
+    // be AFTER this cycle's shift -- sched[i+1] for i<=14, so it only ever
+    // reads indices 1,3,9,14 of the CURRENT (pre-shift) sched.
+    wire [6:0] next_round = round + 1;
+    wire [31:0] next_w = (next_round < 16) ? sched[1]
+                        : rol(sched[14] ^ sched[9] ^ sched[3] ^ sched[1], 1);
+    wire [31:0] next_ekw = d + k_fn(next_round) + next_w;
 
     wire [159:0] digest_bytes = {dg0, dg1, dg2, dg3, dg4};
     wire [3:0] off = dg4[3:0];
@@ -83,17 +103,15 @@ module main(
                     if (start) state <= LOAD1;
                 end
                 LOAD1: begin
-                    block_mem[0] <= 32'h0;
-                    block_mem[1] <= counter;
-                    block_mem[2] <= 32'h80000000;
-                    for (i = 3; i < 15; i = i + 1) block_mem[i] <= 32'h0;
-                    block_mem[15] <= 32'h240;
                     sched[0] <= 32'h0;
                     sched[1] <= counter;
                     sched[2] <= 32'h80000000;
                     for (i = 3; i < 15; i = i + 1) sched[i] <= 32'h0;
                     sched[15] <= 32'h240;
                     a <= SIN0; b <= SIN1; c <= SIN2; d <= SIN3; e <= SIN4;
+                    // round 0's e+K+w: e=SIN4, K[0], w0=block[0]=0 (known directly,
+                    // same as sched[0] above).
+                    ekw_reg <= SIN4 + k_fn(0) + 32'h0;
                     round <= 0;
                     state <= RUN1;
                 end
@@ -101,6 +119,7 @@ module main(
                     e <= d; d <= c; c <= rol(b, 30); b <= a; a <= sum_cur;
                     for (i = 0; i < 15; i = i + 1) sched[i] <= sched[i+1];
                     sched[15] <= w_cur;
+                    ekw_reg <= next_ekw;
                     if (round == 79) state <= FF1;
                     round <= round + 1;
                 end
@@ -109,15 +128,13 @@ module main(
                     state <= LOAD2;
                 end
                 LOAD2: begin
-                    block_mem[0] <= h0; block_mem[1] <= h1; block_mem[2] <= h2;
-                    block_mem[3] <= h3; block_mem[4] <= h4; block_mem[5] <= 32'h80000000;
-                    for (i = 6; i < 15; i = i + 1) block_mem[i] <= 32'h0;
-                    block_mem[15] <= 32'h2A0;
                     sched[0] <= h0; sched[1] <= h1; sched[2] <= h2;
                     sched[3] <= h3; sched[4] <= h4; sched[5] <= 32'h80000000;
                     for (i = 6; i < 15; i = i + 1) sched[i] <= 32'h0;
                     sched[15] <= 32'h2A0;
                     a <= SOUT0; b <= SOUT1; c <= SOUT2; d <= SOUT3; e <= SOUT4;
+                    // round 0's e+K+w for pass 2: e=SOUT4, K[0], w0=block[0]=h0.
+                    ekw_reg <= SOUT4 + k_fn(0) + h0;
                     round <= 0;
                     state <= RUN2;
                 end
@@ -125,6 +142,7 @@ module main(
                     e <= d; d <= c; c <= rol(b, 30); b <= a; a <= sum_cur;
                     for (i = 0; i < 15; i = i + 1) sched[i] <= sched[i+1];
                     sched[15] <= w_cur;
+                    ekw_reg <= next_ekw;
                     if (round == 79) state <= FF2;
                     round <= round + 1;
                 end

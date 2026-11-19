@@ -137,12 +137,13 @@ bot.once("login", async () => {
   bot.chat("//paste");
   await sleep(3000);
 
-  // NOTE: redpiler is NOT usable for this build -- it panics with "Exceeded
-  // the maximum number of default inputs 255" (crates/redpiler/src/backend/
-  // direct/compile.rs:48), almost certainly from the clock or reset net
-  // fanning out to ~1186 flip-flops directly. Stuck with the slower
-  // interpreted path (auto_redpiler=false) until MineRTL's router adds
-  // fanout buffering. See docs/handoff-live-verification-2026-11-19.md.
+  // redpiler previously panicked ("Exceeded the maximum number of default
+  // inputs 255") on wire stacked directly on wire, which only a paste can
+  // produce -- fixed locally with benburk/MCHPRS PR #2 applied to our own
+  // mchprs build. See README.md "Why it was slow, and what got fixed".
+  console.log("[redpiler] /redpiler compile");
+  bot.chat("/redpiler compile");
+  await sleep(10000);
 
   // pulse rst to force a known IDLE state (activateBlock is position-based
   // and server-validated -- see header comment -- so this works regardless
