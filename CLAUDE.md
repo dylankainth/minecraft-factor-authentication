@@ -8,7 +8,7 @@ Build a working **TOTP verifier/generator in pure redstone**, and demonstrate it
 
 "Working" means: for a baked-in secret and an externally supplied time counter, the redstone circuit outputs the same 6-digit code as a standard authenticator app (HMAC-SHA1, 30 s period).
 
-## Current state (stage 1 + 2 done and verified; stage 3 toolchain proven end-to-end; NOT, OR, AND gates verified against a real running server; XOR built and offline-verified but not cleanly live-confirmed due to an open, non-deterministic read-reliability bug; 1-bit full adder started but incomplete -- 2 of ~8 gate stages built, see docs/handoff-full-adder-2026-11-18.md; full-core layout not yet attempted)
+## Current state (2026-11-19: pivoted to MineRTL, a Verilog-to-redstone synthesizer found in-repo -- see docs/handoff-minertl-pivot-2026-11-19.md. The entire TOTP core is now written as Verilog, bit-exact verified in simulation against all 10 RFC 4226 vectors, and successfully synthesized+placed+routed by MineRTL with 0 failed nets / 0 verify errors -- see docs/handoff-minertl-totp-core-2026-11-19.md. NOT YET confirmed running in a live server -- that is the next step, not done. The old hand-routed-gate approach (stage 1-3 below) is superseded for anything past single-primitive gates; its empirical MCHPRS findings remain valid background.)
 
 Files in this repo (commit them as-is):
 
