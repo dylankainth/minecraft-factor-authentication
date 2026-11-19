@@ -1,5 +1,7 @@
 # The M in MFA stands for Minecraft
 
+<img src="slopcoded.png" width="500"> 
+
 A working TOTP (Time-based One-Time Password) generator — the same algorithm behind Google
 Authenticator, Authy, and every other 6-digit MFA app — built out of nothing but Minecraft redstone.
 Give it a secret key and a time counter, and it computes HMAC-SHA1, truncates it, and outputs the same
