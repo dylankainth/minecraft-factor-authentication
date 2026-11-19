@@ -49,22 +49,18 @@ placement and 3D redstone routing, and emits a `.litematic` schematic ready to p
 
 ### The pipeline, end to end
 
-```
-main.v  (synthesizable Verilog, RTL)
-   │  yosys — synthesis, tech mapping
-   ▼
-netlist.json  (gate-level netlist)
-   │  MineRTL's placer — packs gates into a 3D workspace
-   │  MineRTL's router — wires every net with dust/repeaters/torches
-   ▼
-result.litematic  (a real, placed, routed, paste-ready build)
-   │  scripts_litematic_to_schem.py — this project's own converter
-   │  (MCHPRS doesn't read .litematic; it reads Sponge .schem)
-   ▼
-totp_core_corner.schem
-   │  //load + //paste, inside a live MCHPRS server
-   ▼
-a working redstone circuit
+```mermaid
+flowchart TD
+    A["main.v<br/>synthesizable Verilog, RTL"]
+    B["netlist.json<br/>gate-level netlist"]
+    C["result.litematic<br/>placed &amp; routed build"]
+    D["totp_core_corner.schem<br/>Sponge schematic"]
+    E["a working redstone circuit<br/>live in MCHPRS"]
+
+    A -->|"yosys<br/>synthesis, tech mapping"| B
+    B -->|"MineRTL placer + router<br/>packs gates, wires every net"| C
+    C -->|"scripts_litematic_to_schem.py<br/>MCHPRS reads .schem, not .litematic"| D
+    D -->|"//load + //paste<br/>on a live MCHPRS server"| E
 ```
 
 The Verilog itself (`MineRTL_designs/totp_core/main.v`) is a fairly direct translation of this project's
