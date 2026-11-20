@@ -15,27 +15,38 @@ debugging trail behind each of these.
    per-vector rate). Redpiler genuinely works for this build; the bug, not fanout or circuit size, was the
    entire obstacle.
 
-## Immediate next action
+3. **The actual live in-game demo.** In progress. `scripts_make_server_json.py` had a real bug (fixed): it
+   treated every non-`clk` pin as an input needing a lever, including the 21 *output* pins (`code[0..19]`,
+   `done`), writing 55 levers instead of the correct 34 — fixed by actually checking the schematic for a
+   real lever at each candidate position (same rule `crates/headless/README.md` documents: "a pin is an
+   input if there is a lever at cell + (nx, 1, nz)"), not just excluding `clk` by name.
 
-3. **The actual live in-game demo.** This is now the only thing left. The root cause (a raw `//paste` never
-   schedules a tick, so a self-clocking loop never starts) and the fix (the fork's native `/load -c`, or
-   `/watch`) are both understood; Redpiler is confirmed to work correctly on this exact build. Concretely:
-   - Copy `totp_core.litematic` into `mchprs_fork_data/schems/`.
-   - Build a real `.server.json` for it with `scripts_make_server_json.py` (written, **still untested live**)
-     so `/lever <name> [on|off|toggle]` works in-game — MineRTL's own `synth.sh` only writes one when a
-     build has debug probes or a server-driven clock (`builder.py`'s `if resolved_probes or clock_entry:`
-     gate), neither of which this build has, hence the hand-built one.
-   - `/load totp_core.litematic -c` (not `//load` + `//paste`).
-   - Use the same long settle windows (2000+ ticks) the headless fix established between every `rst`/input
-     change — this reflects a genuine real propagation distance in this build, not a headless-only quirk.
-   - Try `/redpiler compile` once loaded, now that it's confirmed to work on this build via headless — worth
-     confirming it also compiles cleanly from a proper `/load -c`, not just from `mchprs_headless`'s own
-     load path, before assuming it'll behave identically live.
-   - `mchprs_fork_server` is already running (port 25566, separate from the original `mchprs` on 25565,
-     patched with the wire-on-wire fix and rebuilt) and `mchprs_fork:local` is built — ready to start.
-   - Measure real wall-clock time for a live, player-visible code generation once this works — every timing
-     number in `README.md` so far comes from headless, which has zero network/chunk-sync overhead a live
-     client does carry. Don't assume the headless numbers transfer directly; measure it.
+   With that fixed, `/load totp_core.litematic -c` **works**: loads a real 224x234x469 build with actual
+   block updates in 7.3 seconds, `/lever <name> [on|off|toggle]` drives inputs cleanly with real chat
+   confirmations ("Turned rst on", "counter[3] is already off", etc.) — a much nicer interface than the old
+   `//set`+`activateBlock` dance `bot/totp_core_probe.js` used. The clock genuinely starts this time; `rst`
+   and `counter[i]` were set via `/lever`, `start` turned on, and the server showed real, sustained CPU
+   usage (~120%) while computing — not frozen.
+
+   **Open issue:** live play is dramatically slower than `mchprs_headless`, even with the same
+   Redpiler-compiled circuit -- it didn't finish a single code within 10 minutes, vs. headless's 10.2s for
+   one code. Likely cause, not fully confirmed: `crates/core/src/plot/mod.rs`'s live tick loop sizes each
+   batch to roughly a 50ms wall-clock window (based on the *previous* batch's measured per-tick cost), and
+   re-does per-cycle housekeeping (player packets, world-send checks, `update_players`, `handle_commands`,
+   etc.) between every batch — overhead `mchprs_headless`'s dedicated, housekeeping-free test harness simply
+   doesn't have. Confirmed NOT a correctness or "frozen clock" problem — CPU was genuinely pegged the whole
+   10 minutes, consistent with real (if slow) computation.
+
+   A second live run is resuming from where the first timed out (`bot/totp_live_resume.js` — reconnects and
+   polls without re-touching `rst`/`counter`/`start`, since the plot only ticks with a player present, so
+   progress should have paused rather than reset when the first bot disconnected) with a 50-minute ceiling.
+   Status not yet known as this is written — check `docker logs totp_live_resume2`.
+
+   If it does eventually finish: measure the real wall-clock time (this is the number `README.md` doesn't
+   have yet — every timing figure there so far is from headless, which has zero network/chunk-sync
+   overhead). If it doesn't finish even given much longer, the live-tick-batching bottleneck is worth a real
+   investigation in its own right, but headless mode already gives complete, legitimate, engine-level
+   correctness verification regardless of whether the live path is ever sped up.
 
 ## Smaller loose ends
 
