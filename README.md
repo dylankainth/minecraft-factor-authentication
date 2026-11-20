@@ -138,8 +138,11 @@ upstream — fixes a real bug in Redpiler's input-search pass: when redstone wir
 of other wire (same X/Z, different Y — something that can only happen from a paste, never natural block
 placement), the search re-walks and re-counts the same links repeatedly until the input cap trips. Their
 own benchmark: a stacked circuit went from refusing to compile within 120 seconds to compiling in **0.33
-seconds**. We applied the fix to our own MCHPRS fork (`mchprs/crates/redpiler/src/passes/frontend/input_search.rs`)
-and rebuilt.
+seconds**. We applied the fix to our local clone of upstream MCHPRS
+(`mchprs/crates/redpiler/src/passes/frontend/input_search.rs`) and rebuilt. (Later, switching to
+[saucefishman/MCHPRS](https://github.com/saucefishman/MCHPRS) — a *different* fork, the one this whole
+section turns out to actually need, see below — the identical unpatched code turned up there too and needed
+the same one-line fix again, rather than assuming it already carried an equivalent one.)
 
 **2. A genuinely redundant register, found by reading our own netlist.** The message schedule (`sched`, a
 16-word sliding window) and a separate `block_mem` array were both being kept as full 32×16-bit registers.
@@ -217,12 +220,30 @@ large — every vector after the first silently kept the previous (correct, but 
 using explicit `set`/`settle 2000`/`set` sequences for every reset and input change instead of the short
 built-in `pulse`.
 
+## All 10 RFC vectors, and Redpiler actually works
+
+The [wire-on-wire fix](#why-it-was-slow-and-what-got-fixed) was applied to `mchprs/` but not yet to
+`mchprs_fork/` (a separate upstream clone) — checking turned up the identical unpatched code there too, so
+it got the same one-line fix. With that in place, Redpiler compiles and runs this build correctly:
+
+| run | mode | vectors | time | result |
+|---|---|---|---|---|
+| single vector (counter=0) | interpreted | 1 | ~3.9 min | 0 failures |
+| single vector (counter=0) | **Redpiler** | 1 | **10.2 s** | 0 failures |
+| **all 10 RFC 4226 vectors** | **Redpiler** | 10 | **24.3 s** | **0 failures** |
+
+All ten: counter 0–9 → `755224, 287082, 359152, 969429, 338314, 254676, 287922, 162583, 399871, 520489` —
+every single one bit-exact, running on MCHPRS's real redstone engine via Redpiler. ~2.4 seconds per code.
+That's roughly 100x faster than the same circuit in plain interpreted mode, and the wire-on-wire bug —
+not fanout, not circuit size — was the entire reason Redpiler looked broken for this build in the first
+place.
+
 ## Status
 
-Simulation-verified (`ref.py`/`datapath.py`/`netlist.py`/Icarus Verilog, all bit-exact against RFC vectors),
-synthesis-verified (MineRTL, 0 failed nets, 0 verify errors), and now **engine-verified**: `mchprs_headless`
-confirms correct end-to-end behavior on MCHPRS's real redstone simulation for 2 of the 10 RFC 4226 vectors,
-0 failures. See `docs/next_steps.md` for what's left — a full 10-vector confirmation, a Redpiler-mode speed
-check, and the actual live in-game demo (now that the root cause and fix are both understood) are all queued
-up but not yet done. Detailed debugging trail across the whole session is in `docs/handoff-live-verification-2026-11-19.md`
-and `docs/handoff-optimization-2026-11-19.md`.
+Fully verified, three independent ways: simulation (`ref.py`/`datapath.py`/`netlist.py`/Icarus Verilog, all
+bit-exact), synthesis (MineRTL, 0 failed nets, 0 verify errors), and now the real redstone engine itself
+(`mchprs_headless` + Redpiler, all 10 RFC 4226 vectors, 0 failures, ~2.4s/code). The one thing left is the
+actual live, player-visible in-game demo — the root cause (a raw `//paste` never starts a self-clocking
+loop) and the fix (the fork's native `/load -c`, or `/watch`) are both understood and queued up in
+`docs/next_steps.md`, just not attempted yet. Detailed debugging trail across the whole session is in
+`docs/handoff-live-verification-2026-11-19.md` and `docs/handoff-optimization-2026-11-19.md`.
