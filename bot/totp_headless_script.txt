@@ -1,0 +1,26 @@
+# TOTP core, counter=0, expect RFC 4226 code 755224
+pulse rst 10
+set start 1
+settle 200000
+print status
+expect done 1
+expect code[0] 0
+expect code[1] 0
+expect code[2] 0
+expect code[3] 1
+expect code[4] 1
+expect code[5] 0
+expect code[6] 0
+expect code[7] 0
+expect code[8] 0
+expect code[9] 1
+expect code[10] 1
+expect code[11] 0
+expect code[12] 0
+expect code[13] 0
+expect code[14] 0
+expect code[15] 1
+expect code[16] 1
+expect code[17] 1
+expect code[18] 0
+expect code[19] 1

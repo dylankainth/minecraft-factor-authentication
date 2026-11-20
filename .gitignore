@@ -5,3 +5,6 @@ mchprs/
 mchprs_data/
 *.schem
 MineRTL/
+mchprs_fork/
+mchprs_fork_data/
+headless_bin/

@@ -1,0 +1,130 @@
+# counter=0, expect 755224
+set rst 1
+settle 2000
+set rst 0
+settle 2000
+set counter[0] 0
+set counter[1] 0
+set counter[2] 0
+set counter[3] 0
+set counter[4] 0
+set counter[5] 0
+set counter[6] 0
+set counter[7] 0
+set counter[8] 0
+set counter[9] 0
+set counter[10] 0
+set counter[11] 0
+set counter[12] 0
+set counter[13] 0
+set counter[14] 0
+set counter[15] 0
+set counter[16] 0
+set counter[17] 0
+set counter[18] 0
+set counter[19] 0
+set counter[20] 0
+set counter[21] 0
+set counter[22] 0
+set counter[23] 0
+set counter[24] 0
+set counter[25] 0
+set counter[26] 0
+set counter[27] 0
+set counter[28] 0
+set counter[29] 0
+set counter[30] 0
+set counter[31] 0
+settle 2000
+set start 1
+settle 200000
+expect done 1
+expect code[0] 0
+expect code[1] 0
+expect code[2] 0
+expect code[3] 1
+expect code[4] 1
+expect code[5] 0
+expect code[6] 0
+expect code[7] 0
+expect code[8] 0
+expect code[9] 1
+expect code[10] 1
+expect code[11] 0
+expect code[12] 0
+expect code[13] 0
+expect code[14] 0
+expect code[15] 1
+expect code[16] 1
+expect code[17] 1
+expect code[18] 0
+expect code[19] 1
+set start 0
+settle 2000
+print after_counter_0
+
+# counter=1, expect 287082
+set rst 1
+settle 2000
+set rst 0
+settle 2000
+set counter[0] 1
+set counter[1] 0
+set counter[2] 0
+set counter[3] 0
+set counter[4] 0
+set counter[5] 0
+set counter[6] 0
+set counter[7] 0
+set counter[8] 0
+set counter[9] 0
+set counter[10] 0
+set counter[11] 0
+set counter[12] 0
+set counter[13] 0
+set counter[14] 0
+set counter[15] 0
+set counter[16] 0
+set counter[17] 0
+set counter[18] 0
+set counter[19] 0
+set counter[20] 0
+set counter[21] 0
+set counter[22] 0
+set counter[23] 0
+set counter[24] 0
+set counter[25] 0
+set counter[26] 0
+set counter[27] 0
+set counter[28] 0
+set counter[29] 0
+set counter[30] 0
+set counter[31] 0
+settle 2000
+set start 1
+settle 200000
+expect done 1
+expect code[0] 0
+expect code[1] 1
+expect code[2] 0
+expect code[3] 1
+expect code[4] 0
+expect code[5] 1
+expect code[6] 1
+expect code[7] 0
+expect code[8] 1
+expect code[9] 0
+expect code[10] 0
+expect code[11] 0
+expect code[12] 0
+expect code[13] 1
+expect code[14] 1
+expect code[15] 0
+expect code[16] 0
+expect code[17] 0
+expect code[18] 1
+expect code[19] 0
+set start 0
+settle 2000
+print after_counter_1
+

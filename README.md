@@ -174,10 +174,55 @@ would cut flip-flop and gate count much further, at the cost of roughly 32x more
 architecture rewrite, not a tweak, and risky to do without time to fully re-verify. Flagged as the next
 lever to pull if the above isn't enough, not implemented here.
 
+## The real bottleneck: a paste doesn't start a clock
+
+After the fixes above, a live run still sat computing for 45+ minutes without ever finishing — slower, not
+faster. The actual cause turned out to be much more fundamental than tick-loop performance.
+
+MCHPRS's WorldEdit-style `//paste` (and `//set`) writes blocks through `set_block_raw`: a direct memory
+write with **zero tick scheduling and zero neighbor updates**. A freshly pasted circuit sits exactly as
+saved, forever, unless something external explicitly triggers it — a real player interaction (a lever
+toggle) does that, but a self-contained oscillating clock loop has nothing of its own to trigger it. Proved
+this empirically on a trivial 4-bit counter: identical, unchanging output across every fresh paste, every
+elapsed-time window, with `//update` applied, and even after physically right-clicking a repeater inside
+the clock loop eight times. The clock was never running — not slowly, not at all. This means essentially
+every "still computing" wait earlier in this project's history was almost certainly watching a frozen
+circuit, not a slow one.
+
+The fix: MineRTL's companion server fork,
+[saucefishman/MCHPRS](https://github.com/saucefishman/MCHPRS), ships a `/load <name>.litematic -c` command
+and an `mchprs_headless` tool that place and update blocks properly — the same way `/watch` does — instead
+of a raw paste. Using `mchprs_headless`'s `redstone` mode (full block update pass after loading, no server
+or game client needed at all) against this project's own `.litematic` + `pins.txt`:
+
+```
+pulse rst 10          # too short! fixed to set/settle/set 2000-tick windows below
+set counter[i] <bit>  # for all 32 bits
+set start 1
+settle 200000
+expect done 1
+expect code[i] <bit>  # for all 20 bits
+```
+
+**Result: 0 failures across the RFC 4226 vectors tested (counter=0 → `755224`, counter=1 → `287082`),
+running on MCHPRS's own real redstone simulation engine** — not just the from-scratch Python reference model,
+not just Icarus Verilog's behavioral simulation, but the actual tick-by-tick block logic this whole project
+set out to run on. ~3.9 minutes per code in plain interpreted mode (no Redpiler), with no network or
+chunk-sync overhead at all — itself revealing: a *correctly initialized* circuit is enormously faster than
+anything observed in any of the live-server attempts, reinforcing that those were stalled, not slow.
+
+One other real bug surfaced along the way: the first attempt at a 10-vector test reused `pulse rst 10`
+between vectors, which is far too short for a reset signal to physically propagate across a circuit this
+large — every vector after the first silently kept the previous (correct, but now stale) result. Fixed by
+using explicit `set`/`settle 2000`/`set` sequences for every reset and input change instead of the short
+built-in `pulse`.
+
 ## Status
 
-Simulation-verified and synthesis-verified as described above, on both the original and the optimized
-build. Live, in-server confirmation of a correct 6-digit code is the one box not yet checked — a run with
-the fixed Redpiler and the optimized circuit is in progress, and this section will be updated honestly once
-it completes or reveals something that needs fixing, rather than claiming success ahead of the result. See
-`docs/handoff-live-verification-2026-11-19.md` for the full debugging trail.
+Simulation-verified (`ref.py`/`datapath.py`/`netlist.py`/Icarus Verilog, all bit-exact against RFC vectors),
+synthesis-verified (MineRTL, 0 failed nets, 0 verify errors), and now **engine-verified**: `mchprs_headless`
+confirms correct end-to-end behavior on MCHPRS's real redstone simulation for 2 of the 10 RFC 4226 vectors,
+0 failures. See `docs/next_steps.md` for what's left — a full 10-vector confirmation, a Redpiler-mode speed
+check, and the actual live in-game demo (now that the root cause and fix are both understood) are all queued
+up but not yet done. Detailed debugging trail across the whole session is in `docs/handoff-live-verification-2026-11-19.md`
+and `docs/handoff-optimization-2026-11-19.md`.
