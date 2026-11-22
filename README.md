@@ -347,13 +347,23 @@ live tick path, and uncovered a fourth, deeper mystery that remains open:
 
    `LOAD1`'s own Verilog body is unconditional — `state <= RUN1;` with no `if` — so it advances to `RUN1`
    on the very next clock edge, no exceptions. Being stuck at `LOAD1` for 90+ seconds therefore means **no
-   clock edge has reached the FSM since the single edge that moved it `IDLE → LOAD1`.** This is the precise
-   finding: the self-generated clock oscillator produces one pulse (likely from `/load -c`'s real
-   block-placement settling, which legitimately does trigger real updates — this project's much earlier,
-   separate fix) and then does not keep oscillating, in live play. Not root-caused further this session —
-   see `docs/next_steps.md` for where to pick this up (the netlist/layout cross-referencing technique is
-   reusable; the main lesson is to re-verify artifact/litematic consistency by hash before trusting derived
-   positions, every time, since synthesis isn't deterministic).
+   clock edge has reached the FSM since the single edge that moved it `IDLE → LOAD1`.**
+
+   **Confirmed directly at the source.** The clock generator turned out to be its own separate litematic
+   region (`build/totp_core.litematic` has a `"clock"` region, 4×2×246 blocks — a long repeater-delay-line
+   loop, found by scanning the litematic directly with `litemapy`, no netlist cross-referencing involved at
+   all). Inspecting three wire/repeater points along that loop, 4 rounds ~4s apart (~100 seconds total): all
+   28 successful reads, every point, every round — **`powered: false`.** The oscillator is completely dead
+   for the whole observation window, not merely slow.
+
+   **The finding:** the self-generated clock oscillator produces one pulse (plausibly from `/load -c`'s
+   real block-placement settling, which legitimately does trigger real updates — this project's much
+   earlier, separate fix) and then never oscillates again, in live play. Not root-caused further this
+   session — see `docs/next_steps.md` for where to pick this up (the netlist/layout cross-referencing
+   technique, and the simpler direct-litematic-region-scan technique used for the final confirmation, are
+   both reusable; the main lesson from the first, wrong attempt is to re-verify artifact/litematic
+   consistency by hash before trusting any derived position, every time, since MineRTL's synthesis isn't
+   deterministic between runs).
 
 Reported honestly as unresolved rather than claimed fixed. Headless verification against the real engine
 remains the project's proof of correctness. The reproducer and diagnostic scripts

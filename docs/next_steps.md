@@ -94,19 +94,27 @@ debugging trail behind each of these.
       that moved it `IDLE → LOAD1`.** The self-generated clock produces one pulse (plausibly from
       `/load -c`'s real block-placement settling) and does not keep oscillating in live play.
 
-      **Next step, precisely scoped:** find the clock's own oscillator loop in the physical build (the
-      `clk` net's `INPUT_PIN` component in `component_layout.json` gives one point on it, though direct
-      raycast-inspection of that exact position failed from every angle tried — the oscillator's redstone
-      loop likely needs a different point along its own path, not its abstract port marker) and watch it
-      across a few real seconds to see whether it's toggling, stuck high, or stuck low. A second angle:
-      compare against `mchprs_headless --run-clock`/`--probes` (a *different* code path for driving a named
-      clock than this build uses, worth checking whether it even applies) or just read whether headless's
-      own `settle N` ever needs more than one clock period's worth of ticks to make progress past `LOAD1` —
-      if even headless's clock is a "one safe pulse during placement, nothing after" affair that just happens
-      to not matter there (because `settle`'s tick loop doesn't depend on additional *real* oscillation, only
-      on redpiler's `tick()` being called enough times), that would mean the oscillator was never the thing
-      doing real work in headless either — worth directly confirming rather than assuming headless's success
-      implies the oscillator continuously runs there.
+      **Confirmed directly, not just inferred.** The clock generator is its own separate litematic region
+      (`litemapy.Schematic.load(...).regions['clock']`, 4×2×246 blocks at local offset `(121,127,223)` in
+      `build/totp_core.litematic` — a long repeater-delay-line loop, no netlist cross-referencing needed,
+      scan the litematic directly with `litemapy` for its block positions). Watched three wire/repeater
+      points along that loop (`bot/totp_check_oscillator.js`) across 4 rounds ~4s apart, ~100 seconds total:
+      **every single read, every point, every round — `powered: false`.** The oscillator is not slow, not
+      intermittent — it is completely dead for the whole observation window, consistent with the FSM-level
+      finding above (one edge, from `/load -c`'s placement settling, then nothing).
+
+      **Next step, precisely scoped — this is now a narrow engine question, not a finding-the-symptom
+      question:** why does this specific physical ring-oscillator structure (sandstone + redstone_wire +
+      repeater, self-looping) not keep running once DirectBackend's `tick()` is driving it, when the exact
+      same structure must be running continuously in `mchprs_headless` (headless's own successful,
+      correct 10-vector run has no other way to make progress). Concretely: compare the SAME 3 wire/repeater
+      positions' state in `mchprs_headless` right after `settle 2000` (before any `set start 1`) against
+      several further `settle 2000` calls — if headless shows them toggling and live doesn't, the bug is
+      specific to the live path (`/load -c`'s placement, or something plot-tick-loop-specific); if headless
+      *also* shows them static after the first settle, that would mean the oscillator was never actually
+      needed for headless's success either (e.g. one edge might be enough to seed something that then runs
+      open-loop without further clock pulses, which would redirect the whole investigation) — don't assume,
+      check directly, the same `/redpiler inspect`-equivalent ground-truth habit that got this far.
    - A completely fresh end-to-end run (no resumes/reconnects in its history) was NOT tried and would also
      be worth ruling out, independent of the above.
 
