@@ -24,18 +24,18 @@ every clock cycle.*
 and the real MCHPRS redstone engine (`mchprs_headless` + Redpiler) all agree bit-exact on all 10 RFC 4226
 test vectors — 0 failures, ~2.4 s/code on real redstone logic.
 
-**Live in-game demo: three more real engine bugs found and fixed, still not finishing.** A second
-investigation session root-caused the live/headless speed gap down to three distinct, confirmed bugs in the
-fork's live tick path — a per-batch O(node-count) `flush()` scan, a `Tps::Unlimited` batch-size calculation
-that silently produces bogus (far too small, sometimes far too large) numbers, and — the big one — the
-*verification methodology itself*: polling the circuit's output via repeated WorldEdit `//count` commands
-while redpiler is actively ticking interferes with live progress. A tiny isolated reproducer (a 119-cell
-counter circuit, exact known tick count, correct and fast in headless) proved this conclusively: it never
-finished while polled every few seconds, but completed within 60 seconds once polling stopped entirely.
-Applying the same fix to the real core got further than ever (confirmed real, correct inputs; confirmed
-tens-of-millions-of-real-ticks/sec sustained) but **still did not reach `done` even after far more
-computation than headless needs for the whole thing** — a correctness gap, not just a speed gap, that the
-small reproducer didn't expose and this session did not root-cause further. Reported honestly as unresolved.
+**Live in-game demo: root-caused to one precise, isolated bug — not yet fixed.** Found and fixed real bugs
+in the fork's live tick path along the way (a per-batch O(node-count) `flush()` scan; a `Tps::Unlimited`
+batch-size calculation producing bogus numbers; and the big one — polling the output via WorldEdit
+`//count` while redpiler is actively ticking stalls live progress, proven with an isolated reproducer and
+fixed by reading outputs exactly once after a silent wait instead). None of that was the actual root cause.
+Direct inspection of the compiled circuit's live state (`/redpiler inspect`) showed the FSM stuck one step
+in, and tracing that to its source found the self-generated clock oscillator — a 246-block repeater delay
+loop — produces exactly one pulse during `/load -c`'s placement and then goes completely dead. Checking the
+identical wires in `mchprs_headless` proved they toggle correctly there the whole time, on the exact same
+litematic and tick code — ruling out the circuit design itself and narrowing the bug to something specific
+about how a self-oscillating loop's pending tick does or doesn't survive the live placement-then-compile
+sequence versus headless's. Reported honestly as unresolved, with the exact next diff to go read documented.
 
 **Everything else:** two construction methods tried (hand-routed gates → abandoned as unscalable; MineRTL
 Verilog synthesis → the one that worked), engine bugs found and fixed along the way (a Redpiler wire-on-wire
@@ -356,14 +356,20 @@ live tick path, and uncovered a fourth, deeper mystery that remains open:
    28 successful reads, every point, every round — **`powered: false`.** The oscillator is completely dead
    for the whole observation window, not merely slow.
 
-   **The finding:** the self-generated clock oscillator produces one pulse (plausibly from `/load -c`'s
-   real block-placement settling, which legitimately does trigger real updates — this project's much
-   earlier, separate fix) and then never oscillates again, in live play. Not root-caused further this
-   session — see `docs/next_steps.md` for where to pick this up (the netlist/layout cross-referencing
-   technique, and the simpler direct-litematic-region-scan technique used for the final confirmation, are
-   both reusable; the main lesson from the first, wrong attempt is to re-verify artifact/litematic
-   consistency by hash before trusting any derived position, every time, since MineRTL's synthesis isn't
-   deterministic between runs).
+   **And the decisive comparison: `mchprs_headless` runs the identical oscillator correctly.** Checked the
+   same three wire/repeater positions in headless (`bot/pins_osccheck.txt`, `bot/totp_headless_osccheck.txt`)
+   at a dozen points across several `settle` calls, both before and after ever touching `start`: `clk` and
+   the oscillator's own wires **genuinely alternate** (0, 1, 0, 1, …) the entire time. Same litematic file,
+   same `DirectBackend::tick()` code (headless's `settle N` is a bare `for _ in 0..N { tick() }` loop, no
+   different from what live eventually calls too) — and it keeps running correctly in headless, but goes
+   permanently dead after one pulse in live play. That rules out the circuit design and `DirectBackend`'s
+   core tick logic itself (both proven correct, by this exact comparison) and narrows the bug to something
+   specific to the *live* placement-then-compile sequence (`/load -c`'s handler in
+   `crates/core/src/plot/commands.rs`) versus headless's own placement-then-compile sequence
+   (`crates/headless/src/lib.rs`) — most likely something about how a self-oscillating loop's *pending
+   scheduled tick* (the thing that makes a ring oscillator self-sustaining once kicked off) does or doesn't
+   survive the transition from raw block placement into the compiled Redpiler graph. Not root-caused all
+   the way to a fix this session — see `docs/next_steps.md` for the precise next diff to go read.
 
 Reported honestly as unresolved rather than claimed fixed. Headless verification against the real engine
 remains the project's proof of correctness. The reproducer and diagnostic scripts

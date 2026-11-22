@@ -1,0 +1,35 @@
+# Checks whether the clock oscillator's own wires (osc0/osc1/osc2, found
+# directly from the litematic's "clock" region) toggle in headless, at
+# several points -- before start is ever asserted, and after -- to see
+# whether headless's success actually depends on sustained oscillation or
+# not.
+settle 500
+print initial
+settle 500
+print after_settle_1
+settle 500
+print after_settle_2
+settle 2000
+print after_settle_3
+set rst 1
+settle 2000
+set rst 0
+settle 2000
+print after_reset
+settle 500
+print before_start_1
+settle 500
+print before_start_2
+settle 500
+print before_start_3
+set start 1
+settle 500
+print after_start_1
+settle 500
+print after_start_2
+settle 500
+print after_start_3
+settle 2000
+print after_start_4
+settle 2000
+print after_start_5

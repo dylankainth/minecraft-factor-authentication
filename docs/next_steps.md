@@ -103,18 +103,28 @@ debugging trail behind each of these.
       intermittent — it is completely dead for the whole observation window, consistent with the FSM-level
       finding above (one edge, from `/load -c`'s placement settling, then nothing).
 
-      **Next step, precisely scoped — this is now a narrow engine question, not a finding-the-symptom
-      question:** why does this specific physical ring-oscillator structure (sandstone + redstone_wire +
-      repeater, self-looping) not keep running once DirectBackend's `tick()` is driving it, when the exact
-      same structure must be running continuously in `mchprs_headless` (headless's own successful,
-      correct 10-vector run has no other way to make progress). Concretely: compare the SAME 3 wire/repeater
-      positions' state in `mchprs_headless` right after `settle 2000` (before any `set start 1`) against
-      several further `settle 2000` calls — if headless shows them toggling and live doesn't, the bug is
-      specific to the live path (`/load -c`'s placement, or something plot-tick-loop-specific); if headless
-      *also* shows them static after the first settle, that would mean the oscillator was never actually
-      needed for headless's success either (e.g. one edge might be enough to seed something that then runs
-      open-loop without further clock pulses, which would redirect the whole investigation) — don't assume,
-      check directly, the same `/redpiler inspect`-equivalent ground-truth habit that got this far.
+      **Checked against `mchprs_headless` — confirmed, this is a real live-only bug, not a design issue.**
+      `bot/pins_osccheck.txt` adds the 3 wire/repeater positions as extra output pins (schematic-local
+      coordinates, same convention as every other pin — `cell = BASE(8,8,8) + pin.pos`, no extra offset
+      math needed since it's an output). `bot/totp_headless_osccheck.txt` samples them across a dozen
+      `settle` calls, both before and after `set start 1`. Result: `clk` and the oscillator's own wires
+      **genuinely alternate (0, 1, 0, 1, …) the whole time** in headless — same litematic, same
+      `DirectBackend::tick()` (headless's `settle N` is a bare `for _ in 0..N { tick() }`, nothing fancier).
+      So the ring oscillator design itself is correct and does run continuously when driven right; it's
+      specifically the *live* path that kills it after one pulse.
+
+      **The real next step: read, don't guess.** Compare headless's placement-then-compile sequence
+      (`run_test_with_probes` in `crates/headless/src/lib.rs` — paste the clipboard, `update_all`, *then*
+      compile redpiler) against live's `/load -c` handler (`crates/core/src/plot/commands.rs`'s `"load"`
+      match arm — places blocks via the schematic-watch/real-update path, *then* calls `start_redpiler`).
+      The leading hypothesis, from everything observed: a self-sustaining ring oscillator needs a *pending
+      scheduled tick* in the world's tick-scheduling queue to keep re-firing; look at what happens to that
+      queue (`to_be_ticked` or equivalent) at the exact moment `Compiler::compile`/`start_redpiler` snapshots
+      the world into the static Redpiler graph, in both paths. If headless's placement leaves a pending tick
+      that survives into the compiled graph, and live's doesn't (or compiles before placement's own pending
+      ticks have run), that's the bug — a scheduling-state loss at compile time, not a tick-execution bug
+      (which this session has now ruled out twice: once via the throughput/batching fixes not helping, once
+      via headless proving the identical tick code keeps the oscillator running fine).
    - A completely fresh end-to-end run (no resumes/reconnects in its history) was NOT tried and would also
      be worth ruling out, independent of the above.
 
