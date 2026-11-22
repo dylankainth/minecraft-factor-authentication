@@ -30,19 +30,19 @@ function waitForChatMatch(regex, timeoutMs) {
 // round) to their driving $_DFFE_PP_ cells' Q pin position in
 // component_layout.json.
 const STATE_OFFSETS = [
-  [31, 210, 159], // state[0]
-  [35, 205, 163], // state[1]
-  [32, 195, 166], // state[2]
-  [19, 205, 167], // state[3]
+  [49, 217, 158], // state[0]
+  [33, 205, 168], // state[1]
+  [30, 214, 167], // state[2]
+  [33, 214, 155], // state[3]
 ];
 const ROUND_OFFSETS = [
-  [45, 95, 198], // round[0]
-  [31, 101, 189], // round[1]
-  [19, 91, 175], // round[2]
-  [31, 64, 191], // round[3]
-  [19, 70, 166], // round[4]
-  [19, 78, 139], // round[5]
-  [19, 86, 153], // round[6]
+  [103, 174, 187], // round[0]
+  [81, 182, 158], // round[1]
+  [100, 169, 194], // round[2]
+  [93, 154, 180], // round[3]
+  [79, 149, 166], // round[4]
+  [65, 182, 158], // round[5]
+  [63, 154, 159], // round[6]
 ];
 
 async function inspectAt(bot, firstPos, offset, label) {

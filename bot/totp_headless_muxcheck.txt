@@ -1,0 +1,53 @@
+# Checks whether the start signal's only consumer (a MUX select input,
+# world-local position 24,185,184) reads powered correctly before/after
+# toggling start -- same check as the live /redpiler inspect finding, but
+# in headless, to see if headless shows the same gap or not.
+set rst 1
+settle 2000
+set rst 0
+settle 2000
+set counter[0] 0
+set counter[1] 0
+set counter[2] 0
+set counter[3] 0
+set counter[4] 0
+set counter[5] 0
+set counter[6] 0
+set counter[7] 0
+set counter[8] 0
+set counter[9] 0
+set counter[10] 0
+set counter[11] 0
+set counter[12] 0
+set counter[13] 0
+set counter[14] 0
+set counter[15] 0
+set counter[16] 0
+set counter[17] 0
+set counter[18] 0
+set counter[19] 0
+set counter[20] 0
+set counter[21] 0
+set counter[22] 0
+set counter[23] 0
+set counter[24] 0
+set counter[25] 0
+set counter[26] 0
+set counter[27] 0
+set counter[28] 0
+set counter[29] 0
+set counter[30] 0
+set counter[31] 0
+settle 2000
+print before_start
+expect muxS 0
+set start 1
+settle 1
+print immediately_after_1_tick
+expect muxS 1
+settle 2000
+print after_settle
+expect muxS 1
+set start 0
+settle 2000
+print after_start_off

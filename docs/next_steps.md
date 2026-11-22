@@ -62,33 +62,51 @@ debugging trail behind each of these.
       confirmed high real throughput (tens of millions of ticks/sec via direct instrumentation, not the
       unreliable `/rtps` self-report), the real core *still* did not reach `done` even after far more ticks
       than headless needs for the whole computation.
-   5. **Found the exact break point via `/redpiler inspect` (new this session, still open).** Used
-      `MCHPRS_LOG=mchprs_redpiler=debug` (not `RUST_LOG` — tried that first, it's the wrong env var and
-      silently does nothing) plus a new technique — cross-reference `netlist.json`'s `netnames` (signal name
-      → net id) against the driving/consuming cell in the same net id, then look that cell up in
-      `component_layout.json` for its world position (origin + the specific pin's offset) — to directly read
-      the compiled graph's real state for the FSM's `state`/`round` registers and `start`'s signal path.
-      Scripts: `scripts_find_regs.py`, `scripts_find_ff_for_nets.py`, `scripts_find_any_pin.py`,
-      `bot/totp_inspect_regs.js`, `bot/totp_check_levers.js`, `bot/totp_check_start_mux.js`. Ground truth:
-      - `rst` lever `powered: false`, `start` lever `powered: true` — both correct.
-      - `state[0..2]` (4-bit FSM state register) and `round[4]` (7-bit round counter): all `powered: false`,
-        **completely unchanged across ~90s of sustained tens-of-millions-of-ticks/sec computation**. The FSM
-        is frozen at `IDLE`.
-      - `start`'s *only* consumer in the entire netlist — a MUX `S` (select) input — reads `powered: false`,
-        despite the lever driving it reading `powered: true`.
+   5. **Found the exact break point via `/redpiler inspect` — first attempt was wrong, corrected, now
+      precise.** Used `MCHPRS_LOG=mchprs_redpiler=debug` (not `RUST_LOG` — silently does nothing) plus a
+      technique for finding any internal signal's world position: cross-reference `netlist.json`'s
+      `netnames` (signal name → net id) against the driving/consuming cell on that net, then look that cell
+      up in `component_layout.json` for a world position (origin + the specific pin's offset).
 
-      **The actual open question now is narrow and well-defined:** why does a lever's `powered: true` not
-      reach its one and only consumer in the compiled graph, when the same litematic file runs correctly in
-      `mchprs_headless`? Candidates not yet checked: (a) whether `mchprs_headless` shows the *same* gap
-      right after loading+settling but before its scripted `set start 1` — i.e. is this specific to a live
-      `/lever` toggle's propagation through an already-compiled Redpiler graph, vs. a placement-time
-      initialization difference; (b) trace the actual physical dust/repeater path between the lever and the
-      MUX (litemapy on `build/totp_core.litematic`) for a missing refresh repeater over a long run — though
-      note this is the *same* physical path headless uses successfully, so a pure wiring defect seems
-      unlikely; (c) whether toggling the lever a second time (off then on again) un-sticks it, which would
-      point at a redpiler graph-compile-time assumption rather than a genuine propagation failure. The
-      position-finding technique above is reusable for whichever of these you check next — it isn't specific
-      to `start`.
+      **Real mistake, worth remembering:** the first pass used `netlist.json`/`component_layout.json` left
+      over from an earlier, *different* MineRTL synthesis run than the litematic actually deployed — MineRTL
+      is not deterministic between runs on identical Verilog (confirmed: a fresh re-synth produced 5,625
+      cells/5,776 nets vs. this build's 6,019/6,170 — different internal netlist, though top-level I/O pin
+      *positions* happened to land in nearly the same place since their placement rule is simpler/stable).
+      Caught by hashing the litematic the artifacts came from against the one actually in use — they
+      didn't match. The derived internal positions from that mismatched pair gave a plausible-looking but
+      unverified result (reported in README's history, since corrected, as "`start` on but its consumer
+      reads off").
+
+      **Fix and redo, if this happens again:** re-synthesize (`synth.sh`), deploy *that exact* litematic
+      everywhere (`build/totp_core.litematic`, the live server's `schems/` dir — and re-touch
+      `*.server.json`'s mtime, or the server warns "server.json is older than the schematic"), re-confirm
+      0 failures in headless with the *existing* `bot/pins.txt` (confirms top-level I/O didn't move), then
+      re-derive every internal position from the artifacts that came from that *same* synth run. Always hash
+      the litematic the artifacts directory's binaries were built from against the litematic file you're
+      about to inspect, before trusting any derived position.
+
+      **The corrected, verified result:** `rst` lever `powered: false` (correct), `start` lever
+      `powered: true` (correct). `state` (4 bits) reads `0001` = **`LOAD1`**, not `IDLE` — identical across
+      two snapshots ~90 seconds apart, under sustained tens-of-millions-of-ticks/sec computation the whole
+      time. `LOAD1`'s Verilog body (`main.v` around line 105) is unconditional: `state <= RUN1;`, no `if` —
+      so being stuck there for 90+ seconds means **no clock edge has reached the FSM since the single edge
+      that moved it `IDLE → LOAD1`.** The self-generated clock produces one pulse (plausibly from
+      `/load -c`'s real block-placement settling) and does not keep oscillating in live play.
+
+      **Next step, precisely scoped:** find the clock's own oscillator loop in the physical build (the
+      `clk` net's `INPUT_PIN` component in `component_layout.json` gives one point on it, though direct
+      raycast-inspection of that exact position failed from every angle tried — the oscillator's redstone
+      loop likely needs a different point along its own path, not its abstract port marker) and watch it
+      across a few real seconds to see whether it's toggling, stuck high, or stuck low. A second angle:
+      compare against `mchprs_headless --run-clock`/`--probes` (a *different* code path for driving a named
+      clock than this build uses, worth checking whether it even applies) or just read whether headless's
+      own `settle N` ever needs more than one clock period's worth of ticks to make progress past `LOAD1` —
+      if even headless's clock is a "one safe pulse during placement, nothing after" affair that just happens
+      to not matter there (because `settle`'s tick loop doesn't depend on additional *real* oscillation, only
+      on redpiler's `tick()` being called enough times), that would mean the oscillator was never the thing
+      doing real work in headless either — worth directly confirming rather than assuming headless's success
+      implies the oscillator continuously runs there.
    - A completely fresh end-to-end run (no resumes/reconnects in its history) was NOT tried and would also
      be worth ruling out, independent of the above.
 

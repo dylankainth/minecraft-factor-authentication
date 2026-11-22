@@ -16,7 +16,7 @@ const FIRST_POS = new Vec3(
   parseInt(process.argv[3] || "8", 10),
   parseInt(process.argv[4] || "277", 10)
 );
-const MUX_S_OFFSET = [24, 185, 184];
+const MUX_S_OFFSET = [21, 190, 180];
 const approaches = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1],[1,1,0],[0,1,1]];
 
 bot.once("login", async () => {

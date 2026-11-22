@@ -319,28 +319,41 @@ live tick path, and uncovered a fourth, deeper mystery that remains open:
    never actually latched (confirmed via `/lever`'s own "Turned start on" vs "already on" response) — fixing
    that and re-running still didn't finish. This is a genuine, unresolved gap between live and headless
    execution that the small reproducer didn't expose and this session did not root-cause further.
-5. **(2026-11-22, continued) Found exactly where the signal breaks.** `/redpiler inspect` reads a compiled
-   node's real internal state directly (bypassing the world/flush path entirely) and logs it server-side
-   (needs `MCHPRS_LOG=mchprs_redpiler=debug`, not `RUST_LOG`). Cross-referencing MineRTL's own build
-   artifacts (`netlist.json` for signal→net-id, `component_layout.json` for net-id→world-position, via the
-   driving flip-flop's or consuming gate's pin offset) located the FSM's `state` and `round` registers and
-   `start`'s only consumer in the compiled graph. Ground truth, read directly off the live compiled circuit:
-   - `rst` lever: `powered: false` — correct.
-   - `start` lever: `powered: true` — correct, genuinely latched (confirmed via its own "Turned start on" ack).
-   - `state[0..2]` (of 4 bits; `state[3]` wasn't reachable by raycast): all `powered: false`, **unchanged
-     across ~90 seconds of sustained tens-of-millions-of-ticks/sec computation** — the FSM is frozen at
-     `IDLE` (state=0).
-   - `start`'s *only* consumer in the whole netlist — a MUX select line — reads `powered: false`.
+5. **(2026-11-22, continued) Found exactly where the computation stalls — and corrected a bad first
+   attempt at this.** `/redpiler inspect` reads a compiled node's real internal state directly (bypassing
+   the world/flush path entirely) and logs it server-side (needs `MCHPRS_LOG=mchprs_redpiler=debug`, not
+   `RUST_LOG`). A technique for finding any internal signal's world position — cross-reference MineRTL's
+   `netlist.json` (signal name → net id) and `component_layout.json` (net id's driving/consuming cell →
+   world position, via that cell's pin offset) — located the FSM's `state`/`round` registers and `start`'s
+   only consumer in the compiled graph.
 
-   That's the real finding: **`start`'s lever is genuinely on, but the signal never reaches the one place
-   in the compiled logic that reads it.** Not a clock problem, not a throughput problem — a signal that's
-   on at its source and off at its only destination. Since this is the same litematic file, same
-   `mchprs_headless`/live DirectBackend code, and headless proves the design itself is correct, this points
-   at something specific to how `/load -c`'s live block-placement (or a live `/lever` toggle's propagation
-   through an already-compiled Redpiler graph) handles this particular wire — not a wiring defect in the
-   build itself. Not root-caused further this session; see `docs/next_steps.md` for exactly where to pick
-   this up (the technique above — netlist/layout cross-referencing to get inspectable positions for any
-   internal signal — is the reusable part).
+   **The first attempt at this got a wrong answer from a real, checkable mistake, worth recording:**
+   MineRTL's synthesis is *not deterministic between runs* (re-running it on the identical Verilog source
+   produced a different cell/net count — 5,625 cells vs. this build's 6,019 — even though the top-level I/O
+   pin layout, driven by simpler, stable placement rules, happened to land in nearly the same spot). The
+   `netlist.json`/`component_layout.json` used for the first pass had been left over from an *earlier,
+   different* synthesis run than the litematic actually in use (confirmed by hashing both — they didn't
+   match). That made the derived internal-signal positions wrong, and a seemingly-clean "signal breaks
+   between the lever and its one consumer" result was most likely just reading unrelated wires that
+   happened to exist at the same coordinates. Redoing the synthesis, deploying *that* exact litematic
+   everywhere (`build/`, the live server's data dir), confirming it still passes all 10 RFC vectors in
+   headless (0 failures — unchanged, since port layout is stable), and re-deriving every position from the
+   *matching* artifacts gave a real answer:
+
+   - `rst` lever: `powered: false`; `start` lever: `powered: true` — both correct, as before.
+   - `state` (4 bits) = `0001` = **`LOAD1`** — not `IDLE`. The FSM *did* advance one step.
+   - This reading was **identical across both snapshots, ~90 seconds apart**, under sustained
+     tens-of-millions-of-ticks/sec computation the whole time.
+
+   `LOAD1`'s own Verilog body is unconditional — `state <= RUN1;` with no `if` — so it advances to `RUN1`
+   on the very next clock edge, no exceptions. Being stuck at `LOAD1` for 90+ seconds therefore means **no
+   clock edge has reached the FSM since the single edge that moved it `IDLE → LOAD1`.** This is the precise
+   finding: the self-generated clock oscillator produces one pulse (likely from `/load -c`'s real
+   block-placement settling, which legitimately does trigger real updates — this project's much earlier,
+   separate fix) and then does not keep oscillating, in live play. Not root-caused further this session —
+   see `docs/next_steps.md` for where to pick this up (the netlist/layout cross-referencing technique is
+   reusable; the main lesson is to re-verify artifact/litematic consistency by hash before trusting derived
+   positions, every time, since synthesis isn't deterministic).
 
 Reported honestly as unresolved rather than claimed fixed. Headless verification against the real engine
 remains the project's proof of correctness. The reproducer and diagnostic scripts
