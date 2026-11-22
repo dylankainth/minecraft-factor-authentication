@@ -8,18 +8,20 @@ Build a working **TOTP verifier/generator in pure redstone**, and demonstrate it
 
 "Working" means: for a baked-in secret and an externally supplied time counter, the redstone circuit outputs the same 6-digit code as a standard authenticator app (HMAC-SHA1, 30 s period).
 
-## Current state (2026-11-22: core correctness is DONE, three independent ways -- see README.md's "TL;DR"
-and "Status" sections for the full, current writeup, which supersedes everything below this line for
-status purposes. Short version: pivoted to MineRTL (Verilog -> redstone synthesis, see
+## Current state (2026-11-22: DONE, including the live demo -- see README.md's "TL;DR" and "Status"
+sections for the full, current writeup, which supersedes everything below this line for status purposes.
+Short version: pivoted to MineRTL (Verilog -> redstone synthesis, see
 docs/handoff-minertl-pivot-2026-11-19.md) after the hand-routed-gate approach didn't scale past single
 primitives (that approach's empirical MCHPRS findings remain valid background). The Verilog core is
-bit-exact verified in simulation, synthesis (0 failed nets/0 verify errors), and now the real engine itself
+bit-exact verified in simulation, synthesis (0 failed nets/0 verify errors), the real engine itself
 (`mchprs_headless` + Redpiler, all 10 RFC 4226 vectors, 0 failures) -- build artifacts for this are committed
 under `build/`, so a fresh clone can reproduce it without re-running synthesis, see README's "How to run
-this yourself". The live, player-visible in-game demo is NOT yet working -- extensively investigated
-(2026-11-19 and 2026-11-22 sessions), three real engine bugs found and fixed along the way, but a genuine
-unresolved correctness/completion gap remains between live and headless execution. See docs/next_steps.md
-before picking that back up -- don't re-litigate what's already been ruled out there.)
+this yourself" -- and now the live, player-visible in-game demo too: a player can `/load -c` the build,
+drive `rst`/`counter`/`start` via `/lever`, and watch the output lamps settle to the correct code in real
+time. Getting the live path working took real engine-level debugging across two sessions (2026-11-19 and
+2026-11-22) -- several real bugs found and fixed, the last and actual one being that `/load -c`'s block
+placement never scheduled the tick a self-oscillating clock needs to start. See docs/next_steps.md for
+remaining rough edges (none correctness-blocking) if picking this back up.)
 
 Files in this repo (commit them as-is):
 
@@ -143,3 +145,8 @@ Only if the user asks. Needs a vanilla 1.21.x server (not MCHPRS), RCON enabled,
 1. Redstone core in a running server outputs the correct 6-digit code for the RFC test key and at least the 10 RFC 4226 counters.
 2. Measured time per code and block count are reported.
 3. A short README explains how to launch the container, load the build, inject a counter and read the result.
+
+**All three met (2026-11-22).** (1): all 10 RFC 4226 vectors confirmed on the real engine via
+`mchprs_headless`, and counter=0 confirmed live, in an actual running server, read directly off the output
+lamps (`done=true`, `code=755224`). (2): timing tables throughout README.md's Status section. (3): README's
+"How to run this yourself" section.

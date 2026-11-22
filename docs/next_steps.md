@@ -113,20 +113,22 @@ debugging trail behind each of these.
       So the ring oscillator design itself is correct and does run continuously when driven right; it's
       specifically the *live* path that kills it after one pulse.
 
-      **The real next step: read, don't guess.** Compare headless's placement-then-compile sequence
-      (`run_test_with_probes` in `crates/headless/src/lib.rs` — paste the clipboard, `update_all`, *then*
-      compile redpiler) against live's `/load -c` handler (`crates/core/src/plot/commands.rs`'s `"load"`
-      match arm — places blocks via the schematic-watch/real-update path, *then* calls `start_redpiler`).
-      The leading hypothesis, from everything observed: a self-sustaining ring oscillator needs a *pending
-      scheduled tick* in the world's tick-scheduling queue to keep re-firing; look at what happens to that
-      queue (`to_be_ticked` or equivalent) at the exact moment `Compiler::compile`/`start_redpiler` snapshots
-      the world into the static Redpiler graph, in both paths. If headless's placement leaves a pending tick
-      that survives into the compiled graph, and live's doesn't (or compiles before placement's own pending
-      ticks have run), that's the bug — a scheduling-state loss at compile time, not a tick-execution bug
-      (which this session has now ruled out twice: once via the throughput/batching fixes not helping, once
-      via headless proving the identical tick code keeps the oscillator running fine).
-   - A completely fresh end-to-end run (no resumes/reconnects in its history) was NOT tried and would also
-     be worth ruling out, independent of the above.
+      **Found and fixed.** `replace_region` in `crates/core/src/plot/watch.rs` (the function `/load -c`
+      actually uses, via `paste_watched_schematic`) sets blocks with no updates at all and explicitly drops
+      pending ticks — its own doc comment says exactly this. `start_redpiler()` runs immediately after, so
+      a self-oscillating loop never gets the pending scheduled tick it needs to bootstrap.
+      `mchprs_headless`'s `update_all()` (a real `mchprs_redstone::update()` call over every position)
+      before compiling is exactly the thing `/load -c` was missing. Added the same kind of pass — iterate
+      every block in the newly-placed region, call `mchprs_redstone::update()` — right before
+      `start_redpiler()` in `paste_watched_schematic()`.
+
+      **Verified, in order:** (1) rebuilt, restarted, re-checked the same 3 oscillator positions from the
+      finding above — now genuinely toggling live. (2) Ran the real core end to end on a fresh
+      `/load -c` + `/lever`-driven run: `done=true`, `code=755224`, exactly the RFC 4226 value for
+      counter 0, read directly off the live circuit. **The live demo works.** See README's Status section,
+      item 6, for the full writeup.
+   - A completely fresh end-to-end run (no resumes/reconnects in its history) was tried as part of the final
+     verification above and worked cleanly.
 
 ## Smaller loose ends
 
@@ -149,6 +151,13 @@ debugging trail behind each of these.
     dividing). Also doesn't carry over from a fresh clone. A temporary `[DEBUG update]` eprintln! was added
     to the same function during this investigation (calls/s, ticks_requested/s, `last_nspt`, batch sizes) —
     useful for future debugging, remove it once no longer needed.
+  - **Reapply the actual live-demo fix** to `mchprs_fork/crates/core/src/plot/watch.rs`'s
+    `paste_watched_schematic()`: right before the `if let Some(options) = compile_options { ... }` block
+    calls `self.start_redpiler(options)`, add a loop over every block position in the newly-pasted region
+    (`first_pos` + `0..cb.size_x/y/z`) calling `mchprs_redstone::update(self.world.get_block(pos), &mut
+    self.world, pos)`. Without this, `/load -c` never finishes on any build containing a self-oscillating
+    clock — see README's Status section, item 6, for the full why. This is the one fix in this whole list
+    that actually matters for correctness, not just speed; don't skip it on a fresh clone.
   - The headless binary needs a Docker-based build, because the project's own `.cargo/config.toml` pins
     `linker = "clang"`, which this environment's WSL install didn't have by default; the Docker route
     (plain `rust:alpine`, no custom linker) sidesteps that entirely. The Dockerfile is kept at the repo root
@@ -168,3 +177,15 @@ debugging trail behind each of these.
   `component_layout.json.gz`) aren't committed anywhere — they're only in `~/minertl_build/totp_artifacts/`
   inside WSL from when the build was last run. Re-run `synth.sh` if that's gone; the scripts in this doc's
   item 5 above expect that directory layout.
+- Any `mineflayer.createBot(...)` driving the live server for more than ~30s under load should pass
+  `checkTimeoutInterval: 120000` (or similar) in its options — minecraft-protocol's default keepalive
+  timeout is 30 seconds (`node_modules/minecraft-protocol/src/client/keepalive.js`), and command
+  round-trips can occasionally run long enough under a busy plot to trip it, dropping the connection with
+  `client.emit('error', ...)` + `client.end('keepAliveError')`. All the `bot/*.js` scripts written during
+  this investigation that connect for any length of time already set this; copy the pattern for new ones.
+- Reading all 20 `code[i]` lamps one at a time (`bot/totp_resume_read.js`'s pattern: fly to each position,
+  `//pos1`/`//pos2`/`//count`) takes several minutes of real wall-clock time under load, since each bit is
+  its own full WorldEdit round trip. Fine for one-off verification; for anything more interactive (a
+  live demo someone actually watches), batch the reads — e.g. one `//count` over a selection spanning all
+  20 lamp positions at once, or inspect several node positions per command via `/redpiler inspect` if that
+  ever grows multi-target support.

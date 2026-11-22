@@ -5,7 +5,7 @@
 const mineflayer = require("mineflayer");
 const Vec3 = require("vec3");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const bot = mineflayer.createBot({ host: process.env.MC_HOST || "mchprs_fork_server", port: parseInt(process.env.MC_PORT || "25565", 10), username: "totp_resume", version: "1.20.4", auth: "offline" });
+const bot = mineflayer.createBot({ host: process.env.MC_HOST || "mchprs_fork_server", port: parseInt(process.env.MC_PORT || "25565", 10), username: "totp_resume", version: "1.20.4", auth: "offline", checkTimeoutInterval: 120000 });
 bot.on("error", (e) => console.error("[error]", e));
 bot.on("end", (r) => { console.log("[end]", r); process.exit(0); });
 bot.on("message", (m) => console.log(`[msg] ${m.toString()}`));
@@ -61,11 +61,11 @@ bot.once("login", async () => {
     await bot.creative.flyTo(pos);
     await sleep(200);
     bot.chat("//pos1");
-    await waitForChatMatch(/First position set/, 10000);
+    await waitForChatMatch(/First position set/, 60000);
     bot.chat("//pos2");
-    await waitForChatMatch(/Second position set/, 10000);
+    await waitForChatMatch(/Second position set/, 60000);
     bot.chat(`//count ${pattern}`);
-    const m = await waitForChatMatch(/Counted (\d+) block/, 15000);
+    const m = await waitForChatMatch(/Counted (\d+) block/, 60000);
     return parseInt(m[1], 10);
   }
   async function isLampLit(pos) {

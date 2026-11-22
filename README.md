@@ -24,18 +24,23 @@ every clock cycle.*
 and the real MCHPRS redstone engine (`mchprs_headless` + Redpiler) all agree bit-exact on all 10 RFC 4226
 test vectors — 0 failures, ~2.4 s/code on real redstone logic.
 
-**Live in-game demo: root-caused to one precise, isolated bug — not yet fixed.** Found and fixed real bugs
-in the fork's live tick path along the way (a per-batch O(node-count) `flush()` scan; a `Tps::Unlimited`
-batch-size calculation producing bogus numbers; and the big one — polling the output via WorldEdit
-`//count` while redpiler is actively ticking stalls live progress, proven with an isolated reproducer and
-fixed by reading outputs exactly once after a silent wait instead). None of that was the actual root cause.
-Direct inspection of the compiled circuit's live state (`/redpiler inspect`) showed the FSM stuck one step
-in, and tracing that to its source found the self-generated clock oscillator — a 246-block repeater delay
-loop — produces exactly one pulse during `/load -c`'s placement and then goes completely dead. Checking the
-identical wires in `mchprs_headless` proved they toggle correctly there the whole time, on the exact same
-litematic and tick code — ruling out the circuit design itself and narrowing the bug to something specific
-about how a self-oscillating loop's pending tick does or doesn't survive the live placement-then-compile
-sequence versus headless's. Reported honestly as unresolved, with the exact next diff to go read documented.
+**Live in-game demo: working. A player can log in and watch the code change in real time.** Found and fixed
+real bugs in the fork's live tick path along the way (a per-batch O(node-count) `flush()` scan; a
+`Tps::Unlimited` batch-size calculation producing bogus numbers; polling the output via WorldEdit `//count`
+while redpiler is actively ticking, which stalls live progress on its own). None of those were the actual
+root cause. Direct inspection of the compiled circuit's live state (`/redpiler inspect`) showed the FSM
+stuck one step in; tracing that to its source found the self-generated clock oscillator — a 246-block
+repeater delay loop — produced exactly one pulse during `/load -c`'s placement and then went completely
+dead, while the identical wires toggled correctly the whole time in `mchprs_headless` on the exact same
+litematic and tick code. The actual bug: `/load -c`'s placement path (`replace_region` in
+`crates/core/src/plot/watch.rs`) sets blocks with **no block updates at all** and explicitly drops any
+pending ticks, then compiles Redpiler immediately — a self-oscillating loop needs a pending scheduled tick
+to bootstrap, and this path never created one. `mchprs_headless` avoids this by calling an `update_all()`
+pass over the whole pasted schematic before compiling; `/load -c` never did. Added the same kind of update
+pass right before `start_redpiler()`. Rebuilt, confirmed the oscillator genuinely toggles live, and ran the
+real core end to end — `/load -c`, drive `rst`/`counter`/`start` via `/lever`, wait, read the lamps back:
+**`done=true`, `code=755224`, exactly matching the RFC 4226 expected value for counter 0.** First real,
+verified, live, in-game run of the whole project.
 
 **Everything else:** two construction methods tried (hand-routed gates → abandoned as unscalable; MineRTL
 Verilog synthesis → the one that worked), engine bugs found and fixed along the way (a Redpiler wire-on-wire
@@ -154,11 +159,26 @@ MineRTL's synthesis pipeline just to check correctness.
    `settle <ticks>`, `expect`) with a different `counter[i]` pattern and re-run step 2 — `ref.py` will
    compute the expected code for any counter value if you want to check your own vector.
 
-**The live, player-visible demo is not yet reliable** — see Status below for exactly why, and
-`docs/next_steps.md` if you want to continue debugging it. If you want to try anyway: `bot/repro_live.js`
-and `bot/repro_nopoll.js` are the smallest working examples of the `/load -c` + `/lever` pattern (driving a
-tiny counter circuit, not the full TOTP core) and the poll-free verification pattern that's required for
-live progress to complete at all.
+**The live, player-visible demo works too** — a player can log in, load the build, drive the inputs, and
+watch the output lamps settle to the correct code. It needs the fix described in Status item 6 below
+applied to the server fork (it's required, not optional — without it a self-clocking build like this one
+never finishes). To see it yourself:
+
+4. **Apply the fork's two required patches.** Clone [saucefishman/MCHPRS](https://github.com/saucefishman/MCHPRS)
+   (same fork as step 1), apply the wire-on-wire fix from step 1 to
+   `crates/redpiler/src/passes/frontend/input_search.rs`, and add the missing update-pass fix described in
+   Status item 6 to `crates/core/src/plot/watch.rs`'s `paste_watched_schematic()` (right before its call to
+   `self.start_redpiler(options)`). Build the server normally (`cargo build --release`) and run it with a
+   data volume mounted at `/data`, with `./schems/` inside that volume holding `build/totp_core.litematic`
+   and `build/totp_core.server.json`.
+5. **Connect and drive it.** Any Minecraft 1.20.4 client (or a scripted one — see `bot/totp_resume_fast.js`
+   for the full flow) can: `/load totp_core.litematic -c` (compiles Redpiler right after loading), then
+   `/lever rst on`, `/lever rst off`, `/lever counter[i] on` for whichever counter bits should be set,
+   `/lever start on`. The output lamps (`code[0]`–`code[19]`, `done`) are real blocks you can walk up to and
+   look at, at the positions `bot/pins.txt` records relative to wherever `/load` placed the build.
+6. **Don't poll for the result — wait, then look once.** Repeatedly checking the output lamps while the
+   circuit is still computing measurably slows it down (see Status item 3) — give it time (well under a
+   minute for this build, once the fix above is applied) and read the lamps once, not in a loop.
 
 ## Why it was slow, and what got fixed
 
@@ -287,10 +307,9 @@ bit-exact), synthesis (MineRTL, 0 failed nets, 0 verify errors), and the real re
 "working" bar from the top of this doc, met three independent ways — this is the headline result.
 
 The live, player-visible in-game demo (`/load -c` + `/lever`, driving the same Redpiler-compiled circuit on
-a real running server, not headless) does load and genuinely start computing — real block updates, real
-sustained CPU usage, confirmed not frozen — but it still does not reach `done`. A second investigation
-session (2026-11-22) dug into *why*, found and fixed three real bugs in `mchprs_fork/crates/core/src/plot/mod.rs`'s
-live tick path, and uncovered a fourth, deeper mystery that remains open:
+a real running server, not headless) now works end to end — see item 6 below for the final result. Getting
+there took a second investigation session (2026-11-22) that found and fixed several real bugs in
+`mchprs_fork/crates/core/src/plot/mod.rs`'s live tick path and `watch.rs`'s placement path:
 
 1. **Per-batch `flush()` scan (fixed, kept).** The live update loop called `redpiler.flush(&mut self.world)`
    — which scans every node in the compiled graph — after *every* tick batch (as often as every 50,000
@@ -311,7 +330,7 @@ live tick path, and uncovered a fourth, deeper mystery that remains open:
    load, drive inputs, sleep a fixed window with zero further commands, read exactly once at the end —
    finished correctly within 60 seconds. This fully explains why every earlier live attempt (10 min, 50 min,
    repeated resumes) never completed: **the verification method itself was the bottleneck**, not the engine.
-4. **Applying the poll-free fix to the real core: further than ever, still not done.** With the fix applied,
+4. **Applying the poll-free fix to the real core: further than ever, but not done yet at this point.** With the fix applied,
    correct inputs, and genuinely-confirmed high throughput (tens of millions of real ticks/sec, sustained,
    confirmed via direct `Plot::update()` instrumentation — not the unreliable `/rtps` self-report), the real
    core still did not reach `done` even after far more cumulative ticks than headless needs for the entire
@@ -368,14 +387,38 @@ live tick path, and uncovered a fourth, deeper mystery that remains open:
    `crates/core/src/plot/commands.rs`) versus headless's own placement-then-compile sequence
    (`crates/headless/src/lib.rs`) — most likely something about how a self-oscillating loop's *pending
    scheduled tick* (the thing that makes a ring oscillator self-sustaining once kicked off) does or doesn't
-   survive the transition from raw block placement into the compiled Redpiler graph. Not root-caused all
-   the way to a fix this session — see `docs/next_steps.md` for the precise next diff to go read.
+   survive the transition from raw block placement into the compiled Redpiler graph.
 
-Reported honestly as unresolved rather than claimed fixed. Headless verification against the real engine
-remains the project's proof of correctness. The reproducer and diagnostic scripts
-(`bot/repro_counter_*`, `bot/repro_live.js`, `bot/repro_nopoll.js`, `bot/totp_resume_fast.js`,
-`bot/totp_inspect_regs.js`, `bot/totp_check_start_mux.js`, `scripts_find_regs.py`,
-`scripts_find_ff_for_nets.py`, `scripts_find_any_pin.py`,
-`bot/totp_verify_inputs.js`, `MineRTL_designs/repro_counter/main.v`) are kept as evidence for whoever
-continues this. Detailed debugging trail across the whole session is in
+6. **Found and fixed.** `replace_region` in `mchprs_fork/crates/core/src/plot/watch.rs` — the function
+   `/load -c` actually uses to place blocks — sets every block with **no block updates at all**, and its
+   own doc comment says so directly: *"Blocks are set without any updates... Pending ticks in the replaced
+   region are dropped."* `start_redpiler()` is then called immediately. A self-oscillating loop has nothing
+   scheduled to kick it off, ever, under that sequence. `mchprs_headless` avoids exactly this by calling its
+   own `update_all()` — a real `mchprs_redstone::update()` call over every position — before compiling.
+   `/load -c` never had an equivalent. Added one: a loop over every block in the newly-pasted region calling
+   `mchprs_redstone::update()`, inserted right before `start_redpiler()` in `paste_watched_schematic()`.
+
+   **Verified in order:** rebuilt, restarted the server, and watched the same three oscillator wire/repeater
+   positions used in finding #5 above — they now genuinely toggle live, the same way they already did in
+   headless. Then ran the real core end to end on a freshly loaded, freshly driven build (`/load -c`, `/lever
+   rst`/`counter`/`start`, a silent wait, then reading every output lamp exactly once): **`done=true`,
+   `code=755224`** — bit-for-bit the RFC 4226 expected value for counter 0, read directly off the live
+   circuit's own lamps. The first genuinely successful live, player-visible run of this entire project.
+
+**Live demo: done.** Headless remains the project's primary correctness proof (it's faster and
+deterministic to re-run), but the live path now works too — a player can log in, load the build, flip the
+levers, and watch the code lamps settle to the right answer in real time. The per-batch flush fix, the
+`Tps::Unlimited` patch, and the poll-free read pattern are all still real and still worth keeping (they cut
+real wall-clock time once the circuit is actually running); the missing-update-pass fix above is what
+actually made it finish. Known rough edges that remain, not blocking but worth knowing: mineflayer's default
+30-second keepalive timeout needs raising (`checkTimeoutInterval` in `createBot`'s options) for bot-driven
+demos against a heavily-loaded plot, since command round-trips can occasionally run long enough to trip it;
+reading all 20 code-lamp bits one at a time currently takes several minutes of real wall-clock time under
+load (each read is its own WorldEdit round trip) — fine for verification, worth batching into fewer
+round-trips for anything more interactive. The reproducer and diagnostic scripts (`bot/repro_counter_*`,
+`bot/repro_live.js`, `bot/repro_nopoll.js`, `bot/totp_resume_fast.js`, `bot/totp_inspect_regs.js`,
+`bot/totp_check_start_mux.js`, `bot/totp_check_oscillator.js`, `bot/totp_read_code_robust.js`,
+`scripts_find_regs.py`, `scripts_find_ff_for_nets.py`, `scripts_find_any_pin.py`,
+`bot/totp_verify_inputs.js`, `MineRTL_designs/repro_counter/main.v`) are kept as evidence of how this was
+found. Detailed debugging trail across the whole investigation is in
 `docs/handoff-live-verification-2026-11-19.md` and `docs/handoff-optimization-2026-11-19.md`.
