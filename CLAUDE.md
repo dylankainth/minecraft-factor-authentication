@@ -8,7 +8,18 @@ Build a working **TOTP verifier/generator in pure redstone**, and demonstrate it
 
 "Working" means: for a baked-in secret and an externally supplied time counter, the redstone circuit outputs the same 6-digit code as a standard authenticator app (HMAC-SHA1, 30 s period).
 
-## Current state (2026-11-19: pivoted to MineRTL, a Verilog-to-redstone synthesizer found in-repo -- see docs/handoff-minertl-pivot-2026-11-19.md. The entire TOTP core is now written as Verilog, bit-exact verified in simulation against all 10 RFC 4226 vectors, and successfully synthesized+placed+routed by MineRTL with 0 failed nets / 0 verify errors -- see docs/handoff-minertl-totp-core-2026-11-19.md. NOT YET confirmed running in a live server -- that is the next step, not done. The old hand-routed-gate approach (stage 1-3 below) is superseded for anything past single-primitive gates; its empirical MCHPRS findings remain valid background.)
+## Current state (2026-11-22: core correctness is DONE, three independent ways -- see README.md's "TL;DR"
+and "Status" sections for the full, current writeup, which supersedes everything below this line for
+status purposes. Short version: pivoted to MineRTL (Verilog -> redstone synthesis, see
+docs/handoff-minertl-pivot-2026-11-19.md) after the hand-routed-gate approach didn't scale past single
+primitives (that approach's empirical MCHPRS findings remain valid background). The Verilog core is
+bit-exact verified in simulation, synthesis (0 failed nets/0 verify errors), and now the real engine itself
+(`mchprs_headless` + Redpiler, all 10 RFC 4226 vectors, 0 failures) -- build artifacts for this are committed
+under `build/`, so a fresh clone can reproduce it without re-running synthesis, see README's "How to run
+this yourself". The live, player-visible in-game demo is NOT yet working -- extensively investigated
+(2026-11-19 and 2026-11-22 sessions), three real engine bugs found and fixed along the way, but a genuine
+unresolved correctness/completion gap remains between live and headless execution. See docs/next_steps.md
+before picking that back up -- don't re-litigate what's already been ruled out there.)
 
 Files in this repo (commit them as-is):
 
