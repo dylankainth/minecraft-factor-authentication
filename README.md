@@ -319,10 +319,34 @@ live tick path, and uncovered a fourth, deeper mystery that remains open:
    never actually latched (confirmed via `/lever`'s own "Turned start on" vs "already on" response) — fixing
    that and re-running still didn't finish. This is a genuine, unresolved gap between live and headless
    execution that the small reproducer didn't expose and this session did not root-cause further.
+5. **(2026-11-22, continued) Found exactly where the signal breaks.** `/redpiler inspect` reads a compiled
+   node's real internal state directly (bypassing the world/flush path entirely) and logs it server-side
+   (needs `MCHPRS_LOG=mchprs_redpiler=debug`, not `RUST_LOG`). Cross-referencing MineRTL's own build
+   artifacts (`netlist.json` for signal→net-id, `component_layout.json` for net-id→world-position, via the
+   driving flip-flop's or consuming gate's pin offset) located the FSM's `state` and `round` registers and
+   `start`'s only consumer in the compiled graph. Ground truth, read directly off the live compiled circuit:
+   - `rst` lever: `powered: false` — correct.
+   - `start` lever: `powered: true` — correct, genuinely latched (confirmed via its own "Turned start on" ack).
+   - `state[0..2]` (of 4 bits; `state[3]` wasn't reachable by raycast): all `powered: false`, **unchanged
+     across ~90 seconds of sustained tens-of-millions-of-ticks/sec computation** — the FSM is frozen at
+     `IDLE` (state=0).
+   - `start`'s *only* consumer in the whole netlist — a MUX select line — reads `powered: false`.
+
+   That's the real finding: **`start`'s lever is genuinely on, but the signal never reaches the one place
+   in the compiled logic that reads it.** Not a clock problem, not a throughput problem — a signal that's
+   on at its source and off at its only destination. Since this is the same litematic file, same
+   `mchprs_headless`/live DirectBackend code, and headless proves the design itself is correct, this points
+   at something specific to how `/load -c`'s live block-placement (or a live `/lever` toggle's propagation
+   through an already-compiled Redpiler graph) handles this particular wire — not a wiring defect in the
+   build itself. Not root-caused further this session; see `docs/next_steps.md` for exactly where to pick
+   this up (the technique above — netlist/layout cross-referencing to get inspectable positions for any
+   internal signal — is the reusable part).
 
 Reported honestly as unresolved rather than claimed fixed. Headless verification against the real engine
 remains the project's proof of correctness. The reproducer and diagnostic scripts
 (`bot/repro_counter_*`, `bot/repro_live.js`, `bot/repro_nopoll.js`, `bot/totp_resume_fast.js`,
+`bot/totp_inspect_regs.js`, `bot/totp_check_start_mux.js`, `scripts_find_regs.py`,
+`scripts_find_ff_for_nets.py`, `scripts_find_any_pin.py`,
 `bot/totp_verify_inputs.js`, `MineRTL_designs/repro_counter/main.v`) are kept as evidence for whoever
 continues this. Detailed debugging trail across the whole session is in
 `docs/handoff-live-verification-2026-11-19.md` and `docs/handoff-optimization-2026-11-19.md`.

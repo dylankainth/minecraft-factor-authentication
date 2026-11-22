@@ -56,18 +56,41 @@ debugging trail behind each of these.
       with a minimal reproducer (`MineRTL_designs/repro_counter/main.v`, `bot/repro_live.js` /
       `bot/repro_nopoll.js`): never finished when polled, finished in ≤60s when read exactly once at the
       end with zero polling in between.
-   4. **Still open:** applying the poll-free pattern to the real `totp_core` (via `bot/totp_resume_fast.js`
-      / `bot/totp_verify_inputs.js`), with correct, confirmed inputs (ruled out one false lead: a mid-session
-      disconnect had left `start` never actually latched — fixed and retested) and confirmed high real
-      throughput (tens of millions of ticks/sec via direct instrumentation, not the unreliable `/rtps`
-      self-report), the real core *still* did not reach `done` even after far more ticks than headless needs
-      for the whole computation. This is a genuine correctness/completion gap between live and headless that
-      the small reproducer did not expose and this session did not root-cause. **If picking this back up:**
-      don't re-litigate the polling or Unlimited-mode findings above (both solid, both fixed/worked around) —
-      start by directly inspecting live register state (`/redpiler inspect` on specific internal signals, not
-      just I/O pins) to find out whether the FSM's `round`/`state` counters are actually advancing at all, or
-      a completely fresh end-to-end run (no resumes/reconnects in its history) to rule out any residual bad
-      state from this session's reconnect saga.
+   4. **Resolved (narrowed, not fixed):** applying the poll-free pattern to the real `totp_core` (via
+      `bot/totp_resume_fast.js` / `bot/totp_verify_inputs.js`), with correct, confirmed inputs (ruled out one
+      false lead: a mid-session disconnect had left `start` never actually latched — fixed and retested) and
+      confirmed high real throughput (tens of millions of ticks/sec via direct instrumentation, not the
+      unreliable `/rtps` self-report), the real core *still* did not reach `done` even after far more ticks
+      than headless needs for the whole computation.
+   5. **Found the exact break point via `/redpiler inspect` (new this session, still open).** Used
+      `MCHPRS_LOG=mchprs_redpiler=debug` (not `RUST_LOG` — tried that first, it's the wrong env var and
+      silently does nothing) plus a new technique — cross-reference `netlist.json`'s `netnames` (signal name
+      → net id) against the driving/consuming cell in the same net id, then look that cell up in
+      `component_layout.json` for its world position (origin + the specific pin's offset) — to directly read
+      the compiled graph's real state for the FSM's `state`/`round` registers and `start`'s signal path.
+      Scripts: `scripts_find_regs.py`, `scripts_find_ff_for_nets.py`, `scripts_find_any_pin.py`,
+      `bot/totp_inspect_regs.js`, `bot/totp_check_levers.js`, `bot/totp_check_start_mux.js`. Ground truth:
+      - `rst` lever `powered: false`, `start` lever `powered: true` — both correct.
+      - `state[0..2]` (4-bit FSM state register) and `round[4]` (7-bit round counter): all `powered: false`,
+        **completely unchanged across ~90s of sustained tens-of-millions-of-ticks/sec computation**. The FSM
+        is frozen at `IDLE`.
+      - `start`'s *only* consumer in the entire netlist — a MUX `S` (select) input — reads `powered: false`,
+        despite the lever driving it reading `powered: true`.
+
+      **The actual open question now is narrow and well-defined:** why does a lever's `powered: true` not
+      reach its one and only consumer in the compiled graph, when the same litematic file runs correctly in
+      `mchprs_headless`? Candidates not yet checked: (a) whether `mchprs_headless` shows the *same* gap
+      right after loading+settling but before its scripted `set start 1` — i.e. is this specific to a live
+      `/lever` toggle's propagation through an already-compiled Redpiler graph, vs. a placement-time
+      initialization difference; (b) trace the actual physical dust/repeater path between the lever and the
+      MUX (litemapy on `build/totp_core.litematic`) for a missing refresh repeater over a long run — though
+      note this is the *same* physical path headless uses successfully, so a pure wiring defect seems
+      unlikely; (c) whether toggling the lever a second time (off then on again) un-sticks it, which would
+      point at a redpiler graph-compile-time assumption rather than a genuine propagation failure. The
+      position-finding technique above is reusable for whichever of these you check next — it isn't specific
+      to `start`.
+   - A completely fresh end-to-end run (no resumes/reconnects in its history) was NOT tried and would also
+     be worth ruling out, independent of the above.
 
 ## Smaller loose ends
 
@@ -101,3 +124,11 @@ debugging trail behind each of these.
     to a fresh directory (`headless_bin_v2`, etc.) instead of waiting, then swap once free.
 - `headless_bin*/mchprs_headless` binaries are gitignored (compiled Linux/musl binaries don't belong in the
   repo) — rebuild with the command above whenever needed.
+- The live server's debug logging env var is `MCHPRS_LOG` (e.g. `MCHPRS_LOG=mchprs_redpiler=debug`), not
+  `RUST_LOG` — the latter is silently ignored (see `mchprs_fork/src/main.rs`'s logging setup). Needed for
+  `/redpiler inspect`'s output, which lands in the *server's* stdout via `tracing::debug!`, not in the
+  requesting player's chat.
+- The MineRTL build artifacts needed to locate internal signal positions (`netlist.json.gz`,
+  `component_layout.json.gz`) aren't committed anywhere — they're only in `~/minertl_build/totp_artifacts/`
+  inside WSL from when the build was last run. Re-run `synth.sh` if that's gone; the scripts in this doc's
+  item 5 above expect that directory layout.
