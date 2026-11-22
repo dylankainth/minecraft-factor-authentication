@@ -126,23 +126,39 @@ own from-scratch, RFC-vector-verified software models (`ref.py`, `datapath.py`, 
    Zero failed nets and zero verify errors on a build this size, on the first real attempt, is the thing
    that made this whole approach worth switching to.
 
-## Getting it onto a real server
+## How to run this yourself
 
-MineRTL writes Litematica's `.litematic` format; the [MCHPRS](https://github.com/MCHPR/MCHPRS) server this
-project runs (for its speed — `/rtps unlimited`, no vanilla tick-rate limits) only reads Sponge `.schem`.
-`scripts_litematic_to_schem.py` bridges the two: it reads the litematic back with
-[`litemapy`](https://github.com/SmylerMC/litemapy), merges every region (a paste can be made of several —
-this build's own clock generator is a separate region layered on top of the main logic), and re-emits it
-through this project's existing Sponge schematic writer.
+The quickest path to seeing this actually work is `mchprs_headless` — it runs the compiled circuit against
+MCHPRS's real redstone/Redpiler engine with no server or game client at all, and it's the path that's
+actually verified (see Status below). The build artifacts it needs (`build/totp_core.litematic`,
+`build/totp_core.server.json`, `bot/pins.txt`) are committed to this repo, so you don't need to re-run
+MineRTL's synthesis pipeline just to check correctness.
 
-Pin positions — which world coordinate is `counter[12]`'s lever, which one is `code[7]`'s lamp — come from
-patching MineRTL's own `scripts/build_with_pins.py` into the same build, which records every I/O pin's
-position and orientation as the tool places it.
+1. **Build `mchprs_headless`.** It needs [saucefishman/MCHPRS](https://github.com/saucefishman/MCHPRS)
+   (the fork with `mchprs_headless` and `.server.json` support) cloned alongside this repo, with the
+   wire-on-wire fix from [benburk/MCHPRS PR #2](https://github.com/benburk/MCHPRS/pull/2) applied to
+   `crates/redpiler/src/passes/frontend/input_search.rs` (see "Why it was slow" below for the diff — it
+   doesn't come applied upstream). Then, since the project's own `.cargo/config.toml` pins a `clang`
+   linker that isn't always available locally, build it in Docker instead:
+   ```
+   DOCKER_BUILDKIT=1 docker build -f Dockerfile.mchprs_headless --target export -o headless_bin <path-to-fork>
+   ```
+2. **Run the RFC vectors.**
+   ```
+   headless_bin/mchprs_headless test build/totp_core.litematic bot/pins.txt bot/totp_headless_all10.txt --modes redpiler
+   ```
+   This drives all 10 RFC 4226 test vectors (counter 0–9) through the real engine and checks every output
+   bit. `0 failures` means it's bit-exact against `ref.py`/`datapath.py`/the Icarus Verilog simulation,
+   three independent ways. Takes about 24 seconds.
+3. **Try your own counter.** Write a script file (see `bot/totp_headless_all10.txt` for the format: `set`,
+   `settle <ticks>`, `expect`) with a different `counter[i]` pattern and re-run step 2 — `ref.py` will
+   compute the expected code for any counter value if you want to check your own vector.
 
-Driving the server is a headless [mineflayer](https://github.com/PrismarineJS/mineflayer) bot
-(`bot/totp_core_probe.js`): it pastes the schematic, pulses reset, sets the 32-bit counter via levers,
-pulses start, and polls for the output lamps to settle — all through real in-game WorldEdit commands and
-block interactions, the same way a player would, just scripted.
+**The live, player-visible demo is not yet reliable** — see Status below for exactly why, and
+`docs/next_steps.md` if you want to continue debugging it. If you want to try anyway: `bot/repro_live.js`
+and `bot/repro_nopoll.js` are the smallest working examples of the `/load -c` + `/lever` pattern (driving a
+tiny counter circuit, not the full TOTP core) and the poll-free verification pattern that's required for
+live progress to complete at all.
 
 ## Why it was slow, and what got fixed
 
