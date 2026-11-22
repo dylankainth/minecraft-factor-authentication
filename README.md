@@ -18,6 +18,23 @@ repeaters threaded through it.*
 SHA-1 round engine — registers, the message schedule, and the add tree that computes `rol5(a) + f + e + K + w`
 every clock cycle.*
 
+## TL;DR — final state
+
+**Correctness: done, three independent ways.** Software reference (`ref.py`), Icarus Verilog simulation,
+and the real MCHPRS redstone engine (`mchprs_headless` + Redpiler) all agree bit-exact on all 10 RFC 4226
+test vectors — 0 failures, ~2.4 s/code on real redstone logic.
+
+**Live in-game demo: builds and runs, but not practically fast.** `/load -c` + `/lever` genuinely loads the
+~835k-block circuit and drives it with real inputs (confirmed: real block updates, sustained CPU, not
+frozen) — but two full attempts (10 min, then a clean 50 min) both timed out before finishing one code,
+versus 10.2 s headless for the same circuit. That ~300x gap is attributed to MCHPRS's live tick-batching
+overhead, not a correctness bug, and is an open problem rather than a solved one.
+
+**Everything else:** two construction methods tried (hand-routed gates → abandoned as unscalable; MineRTL
+Verilog synthesis → the one that worked), two real engine bugs found and fixed along the way (a Redpiler
+wire-on-wire crash, and `//paste`'s raw block writes never starting a self-clocking loop), two datapath
+optimizations applied (schedule-register removal, round-add pipelining). Full story below.
+
 ## What this actually is
 
 HMAC-SHA1 with a 30-second time step, 6-digit output — [RFC 4226](https://www.rfc-editor.org/rfc/rfc4226)
