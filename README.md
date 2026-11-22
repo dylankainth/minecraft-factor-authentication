@@ -241,9 +241,19 @@ place.
 ## Status
 
 Fully verified, three independent ways: simulation (`ref.py`/`datapath.py`/`netlist.py`/Icarus Verilog, all
-bit-exact), synthesis (MineRTL, 0 failed nets, 0 verify errors), and now the real redstone engine itself
-(`mchprs_headless` + Redpiler, all 10 RFC 4226 vectors, 0 failures, ~2.4s/code). The one thing left is the
-actual live, player-visible in-game demo — the root cause (a raw `//paste` never starts a self-clocking
-loop) and the fix (the fork's native `/load -c`, or `/watch`) are both understood and queued up in
-`docs/next_steps.md`, just not attempted yet. Detailed debugging trail across the whole session is in
-`docs/handoff-live-verification-2026-11-19.md` and `docs/handoff-optimization-2026-11-19.md`.
+bit-exact), synthesis (MineRTL, 0 failed nets, 0 verify errors), and the real redstone engine itself
+(`mchprs_headless` + Redpiler, all 10 RFC 4226 vectors, 0 failures, ~2.4s/code). That's the project's
+"working" bar from the top of this doc, met three independent ways — this is the headline result.
+
+The live, player-visible in-game demo (`/load -c` + `/lever`, driving the same Redpiler-compiled circuit on
+a real running server, not headless) does load and genuinely start computing — real block updates, real
+sustained CPU usage, confirmed not frozen — but it does not finish in reasonable wall-clock time. Two full
+attempts (10 min, then a clean 50 min with no crash) both timed out before a single code completed, against
+10.2s for the identical circuit in `mchprs_headless`. That's a ~300x gap, far beyond ordinary
+network/chunk-sync overhead, and points at a real bottleneck in MCHPRS's live tick-batching
+(`crates/core/src/plot/mod.rs`'s per-batch housekeeping between redstone ticks) that headless's dedicated,
+housekeeping-free test harness doesn't pay. Not root-caused further — reported honestly as an open
+limitation rather than a correctness problem, per this project's own working rules. Headless verification
+against the real engine is taken as sufficient proof; the live demo is not pursued further for now. Detailed
+debugging trail across the whole session is in `docs/handoff-live-verification-2026-11-19.md` and
+`docs/handoff-optimization-2026-11-19.md`.

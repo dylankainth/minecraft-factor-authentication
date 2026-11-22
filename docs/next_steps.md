@@ -15,7 +15,9 @@ debugging trail behind each of these.
    per-vector rate). Redpiler genuinely works for this build; the bug, not fanout or circuit size, was the
    entire obstacle.
 
-3. **The actual live in-game demo.** In progress. `scripts_make_server_json.py` had a real bug (fixed): it
+3. ~~The actual live in-game demo.~~ **Attempted, root-caused where it matters, then stopped — decided
+   insufficient ROI to chase further; headless verification stands as the project's proof.**
+   `scripts_make_server_json.py` had a real bug (fixed): it
    treated every non-`clk` pin as an input needing a lever, including the 21 *output* pins (`code[0..19]`,
    `done`), writing 55 levers instead of the correct 34 — fixed by actually checking the schematic for a
    real lever at each candidate position (same rule `crates/headless/README.md` documents: "a pin is an
@@ -37,16 +39,19 @@ debugging trail behind each of these.
    doesn't have. Confirmed NOT a correctness or "frozen clock" problem — CPU was genuinely pegged the whole
    10 minutes, consistent with real (if slow) computation.
 
-   A second live run is resuming from where the first timed out (`bot/totp_live_resume.js` — reconnects and
-   polls without re-touching `rst`/`counter`/`start`, since the plot only ticks with a player present, so
-   progress should have paused rather than reset when the first bot disconnected) with a 50-minute ceiling.
-   Status not yet known as this is written — check `docker logs totp_live_resume2`.
-
-   If it does eventually finish: measure the real wall-clock time (this is the number `README.md` doesn't
-   have yet — every timing figure there so far is from headless, which has zero network/chunk-sync
-   overhead). If it doesn't finish even given much longer, the live-tick-batching bottleneck is worth a real
-   investigation in its own right, but headless mode already gives complete, legitimate, engine-level
-   correctness verification regardless of whether the live path is ever sped up.
+   **Resolved as a known limitation, not pursued further.** A fresh attempt (`totp_live_fresh`, after the
+   machine/Docker went idle and killed an earlier 50-minute resume run silently — restarted Docker and
+   relaunched from scratch) ran a full, clean 50 minutes with no crash this time: `mchprs_fork_server`
+   stayed up the whole time, the bot polled `done` every ~4s throughout, and it ended with a clean
+   `[result] TIMED OUT waiting for done` at t+2998s. Combined with the earlier 10-minute attempt, that's two
+   full timeouts against headless's 10.2s for the identical Redpiler-compiled circuit — a ~300x gap, well
+   beyond ordinary network/chunk-sync overhead. Asked the user how to proceed (resume with a much longer
+   ceiling / root-cause the batching code / accept headless as sufficient and stop); chose to **stop here**.
+   Headless mode already gives complete, legitimate, engine-level correctness verification (all 10 RFC
+   vectors, 0 failures) regardless of whether the live path is ever sped up — see `README.md`'s Status
+   section for the final writeup. The live-tick-batching bottleneck in
+   `crates/core/src/plot/mod.rs` remains unconfirmed as to exact cause and is a good starting point if anyone
+   picks this back up.
 
 ## Smaller loose ends
 
