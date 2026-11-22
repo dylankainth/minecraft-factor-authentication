@@ -39,19 +39,35 @@ debugging trail behind each of these.
    doesn't have. Confirmed NOT a correctness or "frozen clock" problem — CPU was genuinely pegged the whole
    10 minutes, consistent with real (if slow) computation.
 
-   **Resolved as a known limitation, not pursued further.** A fresh attempt (`totp_live_fresh`, after the
-   machine/Docker went idle and killed an earlier 50-minute resume run silently — restarted Docker and
-   relaunched from scratch) ran a full, clean 50 minutes with no crash this time: `mchprs_fork_server`
-   stayed up the whole time, the bot polled `done` every ~4s throughout, and it ended with a clean
-   `[result] TIMED OUT waiting for done` at t+2998s. Combined with the earlier 10-minute attempt, that's two
-   full timeouts against headless's 10.2s for the identical Redpiler-compiled circuit — a ~300x gap, well
-   beyond ordinary network/chunk-sync overhead. Asked the user how to proceed (resume with a much longer
-   ceiling / root-cause the batching code / accept headless as sufficient and stop); chose to **stop here**.
-   Headless mode already gives complete, legitimate, engine-level correctness verification (all 10 RFC
-   vectors, 0 failures) regardless of whether the live path is ever sped up — see `README.md`'s Status
-   section for the final writeup. The live-tick-batching bottleneck in
-   `crates/core/src/plot/mod.rs` remains unconfirmed as to exact cause and is a good starting point if anyone
-   picks this back up.
+   **First stop (2026-11-19 session close):** two full timeouts (10 min, then a clean 50 min, no crash) vs.
+   headless's 10.2s — a ~300x gap. Decided to stop and accept headless as sufficient proof.
+
+   **Reopened 2026-11-22 — three real bugs found and fixed, a fourth mystery found and left open.** See
+   `README.md`'s Status section for the full writeup; summary here:
+   1. **Fixed, kept:** live's `update()` called `redpiler.flush()` (an O(node-count) scan) after every tick
+      batch instead of once before a read, like `mchprs_headless` does. Moved it to the existing
+      network-send-throttled point in `crates/core/src/plot/mod.rs`.
+   2. **Patched, not the real fix:** `Tps::Unlimited`'s self-reported throughput was wildly inconsistent
+      (7M–140M ticks/sec, not matching its own computed ceiling). Patched a suspected zero-elapsed-time trap
+      in the batch-size calc; separately found that a large *finite* `/rtps N` gives trustworthy numbers
+      where `unlimited` doesn't. Neither fully explained the gap.
+   3. **The real cause of "never finishes":** polling the output via WorldEdit `//count` every few seconds
+      — the exact method every live-demo script in this project used — stalls live redstone progress. Proven
+      with a minimal reproducer (`MineRTL_designs/repro_counter/main.v`, `bot/repro_live.js` /
+      `bot/repro_nopoll.js`): never finished when polled, finished in ≤60s when read exactly once at the
+      end with zero polling in between.
+   4. **Still open:** applying the poll-free pattern to the real `totp_core` (via `bot/totp_resume_fast.js`
+      / `bot/totp_verify_inputs.js`), with correct, confirmed inputs (ruled out one false lead: a mid-session
+      disconnect had left `start` never actually latched — fixed and retested) and confirmed high real
+      throughput (tens of millions of ticks/sec via direct instrumentation, not the unreliable `/rtps`
+      self-report), the real core *still* did not reach `done` even after far more ticks than headless needs
+      for the whole computation. This is a genuine correctness/completion gap between live and headless that
+      the small reproducer did not expose and this session did not root-cause. **If picking this back up:**
+      don't re-litigate the polling or Unlimited-mode findings above (both solid, both fixed/worked around) —
+      start by directly inspecting live register state (`/redpiler inspect` on specific internal signals, not
+      just I/O pins) to find out whether the FSM's `round`/`state` counters are actually advancing at all, or
+      a completely fresh end-to-end run (no resumes/reconnects in its history) to rule out any residual bad
+      state from this session's reconnect saga.
 
 ## Smaller loose ends
 
@@ -67,6 +83,13 @@ debugging trail behind each of these.
   - Reapply the wire-on-wire fix to `mchprs_fork/crates/redpiler/src/passes/frontend/input_search.rs`
     (identical diff to the one already applied to `mchprs/`, see README) — it does not carry over from a
     fresh clone.
+  - Reapply the two live-tick-path fixes to `mchprs_fork/crates/core/src/plot/mod.rs` (see README's Status
+    section for what/why): the deferred `redpiler.flush()` (move it out of the per-batch hot path into the
+    existing `time_since_last_world_send > world_send_rate` block, alongside `world.flush_block_changes()`),
+    and the `max_batch_size` zero-elapsed-time clamp (`last_nspt.max(Duration::from_nanos(1))` before
+    dividing). Also doesn't carry over from a fresh clone. A temporary `[DEBUG update]` eprintln! was added
+    to the same function during this investigation (calls/s, ticks_requested/s, `last_nspt`, batch sizes) —
+    useful for future debugging, remove it once no longer needed.
   - The headless binary needs a Docker-based build, because the project's own `.cargo/config.toml` pins
     `linker = "clang"`, which this environment's WSL install didn't have by default; the Docker route
     (plain `rust:alpine`, no custom linker) sidesteps that entirely. The Dockerfile is kept at the repo root

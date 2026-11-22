@@ -1,0 +1,8 @@
+set rst 1
+settle 500
+set rst 0
+settle 500
+set start 1
+settle 3000000
+expect done 1
+print after_start

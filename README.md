@@ -24,16 +24,24 @@ every clock cycle.*
 and the real MCHPRS redstone engine (`mchprs_headless` + Redpiler) all agree bit-exact on all 10 RFC 4226
 test vectors — 0 failures, ~2.4 s/code on real redstone logic.
 
-**Live in-game demo: builds and runs, but not practically fast.** `/load -c` + `/lever` genuinely loads the
-~835k-block circuit and drives it with real inputs (confirmed: real block updates, sustained CPU, not
-frozen) — but two full attempts (10 min, then a clean 50 min) both timed out before finishing one code,
-versus 10.2 s headless for the same circuit. That ~300x gap is attributed to MCHPRS's live tick-batching
-overhead, not a correctness bug, and is an open problem rather than a solved one.
+**Live in-game demo: three more real engine bugs found and fixed, still not finishing.** A second
+investigation session root-caused the live/headless speed gap down to three distinct, confirmed bugs in the
+fork's live tick path — a per-batch O(node-count) `flush()` scan, a `Tps::Unlimited` batch-size calculation
+that silently produces bogus (far too small, sometimes far too large) numbers, and — the big one — the
+*verification methodology itself*: polling the circuit's output via repeated WorldEdit `//count` commands
+while redpiler is actively ticking interferes with live progress. A tiny isolated reproducer (a 119-cell
+counter circuit, exact known tick count, correct and fast in headless) proved this conclusively: it never
+finished while polled every few seconds, but completed within 60 seconds once polling stopped entirely.
+Applying the same fix to the real core got further than ever (confirmed real, correct inputs; confirmed
+tens-of-millions-of-real-ticks/sec sustained) but **still did not reach `done` even after far more
+computation than headless needs for the whole thing** — a correctness gap, not just a speed gap, that the
+small reproducer didn't expose and this session did not root-cause further. Reported honestly as unresolved.
 
 **Everything else:** two construction methods tried (hand-routed gates → abandoned as unscalable; MineRTL
-Verilog synthesis → the one that worked), two real engine bugs found and fixed along the way (a Redpiler
-wire-on-wire crash, and `//paste`'s raw block writes never starting a self-clocking loop), two datapath
-optimizations applied (schedule-register removal, round-add pipelining). Full story below.
+Verilog synthesis → the one that worked), engine bugs found and fixed along the way (a Redpiler wire-on-wire
+crash, `//paste`'s raw block writes never starting a self-clocking loop, the three live-tick-path bugs
+above), two datapath optimizations applied (schedule-register removal, round-add pipelining). Full story
+below.
 
 ## What this actually is
 
@@ -264,13 +272,41 @@ bit-exact), synthesis (MineRTL, 0 failed nets, 0 verify errors), and the real re
 
 The live, player-visible in-game demo (`/load -c` + `/lever`, driving the same Redpiler-compiled circuit on
 a real running server, not headless) does load and genuinely start computing — real block updates, real
-sustained CPU usage, confirmed not frozen — but it does not finish in reasonable wall-clock time. Two full
-attempts (10 min, then a clean 50 min with no crash) both timed out before a single code completed, against
-10.2s for the identical circuit in `mchprs_headless`. That's a ~300x gap, far beyond ordinary
-network/chunk-sync overhead, and points at a real bottleneck in MCHPRS's live tick-batching
-(`crates/core/src/plot/mod.rs`'s per-batch housekeeping between redstone ticks) that headless's dedicated,
-housekeeping-free test harness doesn't pay. Not root-caused further — reported honestly as an open
-limitation rather than a correctness problem, per this project's own working rules. Headless verification
-against the real engine is taken as sufficient proof; the live demo is not pursued further for now. Detailed
-debugging trail across the whole session is in `docs/handoff-live-verification-2026-11-19.md` and
-`docs/handoff-optimization-2026-11-19.md`.
+sustained CPU usage, confirmed not frozen — but it still does not reach `done`. A second investigation
+session (2026-11-22) dug into *why*, found and fixed three real bugs in `mchprs_fork/crates/core/src/plot/mod.rs`'s
+live tick path, and uncovered a fourth, deeper mystery that remains open:
+
+1. **Per-batch `flush()` scan (fixed, kept).** The live update loop called `redpiler.flush(&mut self.world)`
+   — which scans every node in the compiled graph — after *every* tick batch (as often as every 50,000
+   ticks). `mchprs_headless`'s own code comments explain the correct pattern: flush scans every node, so do
+   it once, right before the world is actually read, not on every tick. Moved the flush to the same
+   throttled point where `world.flush_block_changes()` already runs.
+2. **`Tps::Unlimited`'s batch-size math is unreliable (patched, didn't fix the real issue).** Its self-reported
+   throughput ranged from ~7 million to ~140 million ticks/sec across runs, while the server's own hard ceiling
+   (computed from measured per-tick cost) was ~564,000–143,000,000 depending on sample — internally
+   inconsistent. Patched a suspected cause (a batch that measures as exactly zero elapsed time collapsing
+   the batch size back to 1 forever) and separately found that using a large *finite* `/rtps N` instead of
+   `unlimited` produces sane, trustworthy throughput numbers that actually match the requested rate. Neither
+   change alone explained the full gap — see below.
+3. **The real smoking gun: polling the output while redpiler is ticking stalls progress.** A minimal 119-cell
+   reproducer circuit (known exact tick count, correct and fast — 1.26s — in headless) **never finished at
+   all** when polled every few seconds via WorldEdit's `//pos1`/`//pos2`/`//count` (the same mechanism every
+   live-demo script in this project used to read lamp state), even after 10 minutes. Removing all polling —
+   load, drive inputs, sleep a fixed window with zero further commands, read exactly once at the end —
+   finished correctly within 60 seconds. This fully explains why every earlier live attempt (10 min, 50 min,
+   repeated resumes) never completed: **the verification method itself was the bottleneck**, not the engine.
+4. **Applying the poll-free fix to the real core: further than ever, still not done.** With the fix applied,
+   correct inputs, and genuinely-confirmed high throughput (tens of millions of real ticks/sec, sustained,
+   confirmed via direct `Plot::update()` instrumentation — not the unreliable `/rtps` self-report), the real
+   core still did not reach `done` even after far more cumulative ticks than headless needs for the entire
+   computation. One early false lead was ruled out directly: a mid-session client disconnect had left `start`
+   never actually latched (confirmed via `/lever`'s own "Turned start on" vs "already on" response) — fixing
+   that and re-running still didn't finish. This is a genuine, unresolved gap between live and headless
+   execution that the small reproducer didn't expose and this session did not root-cause further.
+
+Reported honestly as unresolved rather than claimed fixed. Headless verification against the real engine
+remains the project's proof of correctness. The reproducer and diagnostic scripts
+(`bot/repro_counter_*`, `bot/repro_live.js`, `bot/repro_nopoll.js`, `bot/totp_resume_fast.js`,
+`bot/totp_verify_inputs.js`, `MineRTL_designs/repro_counter/main.v`) are kept as evidence for whoever
+continues this. Detailed debugging trail across the whole session is in
+`docs/handoff-live-verification-2026-11-19.md` and `docs/handoff-optimization-2026-11-19.md`.
