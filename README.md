@@ -403,7 +403,9 @@ there took a second investigation session (2026-11-22) that found and fixed seve
    headless. Then ran the real core end to end on a freshly loaded, freshly driven build (`/load -c`, `/lever
    rst`/`counter`/`start`, a silent wait, then reading every output lamp exactly once): **`done=true`,
    `code=755224`** — bit-for-bit the RFC 4226 expected value for counter 0, read directly off the live
-   circuit's own lamps. The first genuinely successful live, player-visible run of this entire project.
+   circuit's own lamps. The first genuinely successful live, player-visible run of this entire project. A
+   second, independent counter value confirmed it wasn't a fluke: counter=1 on a fresh `/load -c` →
+   **`done=true`, `code=287082`** — again the exact RFC 4226 value, read the same way.
 
 **Live demo: done.** Headless remains the project's primary correctness proof (it's faster and
 deterministic to re-run), but the live path now works too — a player can log in, load the build, flip the
