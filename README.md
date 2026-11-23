@@ -39,8 +39,9 @@ to bootstrap, and this path never created one. `mchprs_headless` avoids this by 
 pass over the whole pasted schematic before compiling; `/load -c` never did. Added the same kind of update
 pass right before `start_redpiler()`. Rebuilt, confirmed the oscillator genuinely toggles live, and ran the
 real core end to end — `/load -c`, drive `rst`/`counter`/`start` via `/lever`, wait, read the lamps back:
-**`done=true`, `code=755224`, exactly matching the RFC 4226 expected value for counter 0.** First real,
-verified, live, in-game run of the whole project.
+**`done=true`, `code=755224`, exactly matching the RFC 4226 expected value for counter 0.** Then all 10
+RFC 4226 vectors, live, in one sitting, no reconnects: **10 for 10.** First real, verified, live, in-game
+run of the whole project, with the exact same vector coverage headless has.
 
 **Everything else:** two construction methods tried (hand-routed gates → abandoned as unscalable; MineRTL
 Verilog synthesis → the one that worked), engine bugs found and fixed along the way (a Redpiler wire-on-wire
@@ -403,10 +404,30 @@ there took a second investigation session (2026-11-22) that found and fixed seve
    headless. Then ran the real core end to end on a freshly loaded, freshly driven build (`/load -c`, `/lever
    rst`/`counter`/`start`, a silent wait, then reading every output lamp exactly once): **`done=true`,
    `code=755224`** — bit-for-bit the RFC 4226 expected value for counter 0, read directly off the live
-   circuit's own lamps. The first genuinely successful live, player-visible run of this entire project. A
-   second, independent counter value confirmed it wasn't a fluke: counter=1 on a fresh `/load -c` →
-   **`done=true`, `code=287082`** — again the exact RFC 4226 value, read the same way. A third
-   (counter=5 → `done=true`, `code=254676`) confirmed it again.
+   circuit's own lamps. The first genuinely successful live, player-visible run of this entire project.
+
+   **Then all 10 RFC 4226 vectors, live, in one sitting.** One `/load -c`, then for each counter 0–9:
+   pulse `rst` (toggling only the counter bits that changed since the previous vector — `rst` alone forces
+   the FSM back to `IDLE` and it latches straight into `LOAD1` again as soon as `rst` releases, exactly
+   like `mchprs_headless`'s own reset pattern, so `start` never needs to be touched again after the first
+   vector), wait, read `done` and all 20 code bits exactly once, move to the next vector — no reconnects,
+   no reloads in between.
+
+   | counter | expected | live result | match |
+   |---|---|---|---|
+   | 0 | 755224 | 755224 | ✅ |
+   | 1 | 287082 | 287082 | ✅ |
+   | 2 | 359152 | 359152 | ✅ |
+   | 3 | 969429 | 969429 | ✅ |
+   | 4 | 338314 | 338314 | ✅ |
+   | 5 | 254676 | 254676 | ✅ |
+   | 6 | 287922 | 287922 | ✅ |
+   | 7 | 162583 | 162583 | ✅ |
+   | 8 | 399871 | 399871 | ✅ |
+   | 9 | 520489 | 520489 | ✅ |
+
+   **10 for 10.** Every RFC 4226 test vector this project's correctness claim has ever rested on, now
+   confirmed on the real, live, player-visible circuit, not just headless. (`bot/totp_live_all10.js`.)
 
 **Live demo: done.** Headless remains the project's primary correctness proof (it's faster and
 deterministic to re-run), but the live path now works too — a player can log in, load the build, flip the

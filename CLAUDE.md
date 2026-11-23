@@ -146,7 +146,8 @@ Only if the user asks. Needs a vanilla 1.21.x server (not MCHPRS), RCON enabled,
 2. Measured time per code and block count are reported.
 3. A short README explains how to launch the container, load the build, inject a counter and read the result.
 
-**All three met (2026-11-22).** (1): all 10 RFC 4226 vectors confirmed on the real engine via
-`mchprs_headless`, and counter=0 confirmed live, in an actual running server, read directly off the output
-lamps (`done=true`, `code=755224`). (2): timing tables throughout README.md's Status section. (3): README's
-"How to run this yourself" section.
+**All three met (2026-11-22/23).** (1): all 10 RFC 4226 vectors confirmed on the real engine via
+`mchprs_headless`, AND all 10 confirmed again live, in an actual running server, read directly off the
+output lamps for every counter 0-9 (`done=true`, exact match every time -- see README's Status section
+item 6 for the full table). (2): timing tables throughout README.md's Status section. (3): README's "How
+to run this yourself" section.
