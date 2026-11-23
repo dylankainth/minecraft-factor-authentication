@@ -4,6 +4,33 @@ Where this session left off, and what's queued up next. See `README.md` for the 
 `docs/handoff-live-verification-2026-11-19.md` / `docs/handoff-optimization-2026-11-19.md` for the detailed
 debugging trail behind each of these.
 
+## Immediate next step (2026-11-23 session close)
+
+Added a real seven-segment display (`seg0`-`seg5` ports in `main.v`); see README's new "Seven-segment
+display" section for the full writeup. **Binary `code` output is live-confirmed on this exact build**
+(`code=755224`, exact match, after a server restart). **The seven-segment digit lamps are not yet
+confirmed live end-to-end in one clean run** — strongly evidenced offline (clean synthesis, 352 real lamp
+blocks correctly placed) but not confirmed live, so don't claim it works without finishing this.
+
+To pick this back up:
+1. The circuit is likely still sitting loaded and driven (counter=0, `done=true`) on `mchprs_fork_server`
+   from this session's last run — try reading it directly before reloading.
+2. Use `bot/totp_read_display_clean.js <firstPos.x> <firstPos.y> <firstPos.z> 755224` (the furthest-
+   progressed reader) — it found and fixed two real bugs this session (see README): (a) seg tile reads
+   need `outputPos`'s `+1,+1` tile-center offset, already in the script; (b) a retry's "skip resending if
+   already in queue" check must match the *specific coordinates* of the current target, not just the bare
+   phrase "First position set" — a stale reply from the *previous* lamp can otherwise be wrongly accepted
+   (confirmed: produced sparse, no-valid-digit bit patterns). Both fixes are already applied in the
+   committed version of this script.
+3. It's slow (each of 62 lamps is its own `//pos1`/`//pos2`/`//count` round trip under whatever load the
+   server is under) — give it a long watchdog (45+ min) and just let it run, don't keep restarting it.
+4. Do **not** try `bot.blockAt()` as a shortcut — confirmed this session that it never reflects Redpiler's
+   live state (stuck reporting `done=false` through 100+ seconds of polling); `//count` is the only
+   reliable read path for a Redpiler-compiled circuit.
+5. If a long read keeps timing out/hanging in ways that don't look like simple latency, check whether the
+   server itself has degraded under hours of bot churn (this session saw paste time balloon from ~5s to
+   15-35s) — a plain `docker restart mchprs_fork_server` fixed it outright once already.
+
 ## Done since this doc was first written
 
 1. ~~Full 10-vector `mchprs_headless` confirmation.~~ **Done.** All 10 RFC 4226 vectors pass, 0 failures,

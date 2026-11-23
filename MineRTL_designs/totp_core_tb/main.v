@@ -17,7 +17,18 @@ module main(
     input start,
     input [31:0] counter,
     output [19:0] code,
-    output done
+    output done,
+    // Six-digit seven-segment readout of the same code_r value `code` already
+    // exposes, most-significant digit first (seg5 = hundred-thousands ...
+    // seg0 = ones). Purely combinational off the stable code_r register, same
+    // as `code` itself -- meaningful once `done` is high, holds the previous
+    // value otherwise, exactly like `code` already does.
+    output [6:0] seg0,
+    output [6:0] seg1,
+    output [6:0] seg2,
+    output [6:0] seg3,
+    output [6:0] seg4,
+    output [6:0] seg5
 );
     // S_in = compress(IV, key^ipad), S_out = compress(IV, key^opad) for the RFC test key.
     localparam [31:0] SIN0 = 32'hcbc80c8c, SIN1 = 32'hf599e2ac, SIN2 = 32'hbdb8c832,
@@ -164,4 +175,43 @@ module main(
 
     assign code = code_r;
     assign done = done_r;
+
+    // Six-digit decimal breakdown of code_r (0-999999), ones place first.
+    // Constant-divide/modulo, same as the existing `% 1000000` truncation
+    // step above -- synthesis already handles that fine, this is no
+    // different, just six more of them.
+    wire [3:0] digit0 = code_r % 10;
+    wire [3:0] digit1 = (code_r / 10) % 10;
+    wire [3:0] digit2 = (code_r / 100) % 10;
+    wire [3:0] digit3 = (code_r / 1000) % 10;
+    wire [3:0] digit4 = (code_r / 10000) % 10;
+    wire [3:0] digit5 = (code_r / 100000) % 10;
+
+    // seg[6:0] = abcdefg, common cathode active high (same convention as
+    // MineRTL's own examples/sevenseg/sevenseg.v).
+    function [6:0] seven_seg;
+        input [3:0] d;
+        begin
+            case (d)
+                4'd0: seven_seg = 7'b1111110;
+                4'd1: seven_seg = 7'b0110000;
+                4'd2: seven_seg = 7'b1101101;
+                4'd3: seven_seg = 7'b1111001;
+                4'd4: seven_seg = 7'b0110011;
+                4'd5: seven_seg = 7'b1011011;
+                4'd6: seven_seg = 7'b1011111;
+                4'd7: seven_seg = 7'b1110000;
+                4'd8: seven_seg = 7'b1111111;
+                4'd9: seven_seg = 7'b1111011;
+                default: seven_seg = 7'b0000000;
+            endcase
+        end
+    endfunction
+
+    assign seg0 = seven_seg(digit0);
+    assign seg1 = seven_seg(digit1);
+    assign seg2 = seven_seg(digit2);
+    assign seg3 = seven_seg(digit3);
+    assign seg4 = seven_seg(digit4);
+    assign seg5 = seven_seg(digit5);
 endmodule

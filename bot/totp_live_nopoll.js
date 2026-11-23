@@ -16,6 +16,7 @@ const bot = mineflayer.createBot({
   username: "totp_nopoll",
   version: "1.20.4",
   auth: "offline",
+  checkTimeoutInterval: 120000,
 });
 bot.on("error", (e) => console.error("[error]", e));
 bot.on("end", (r) => { console.log("[end]", r); process.exit(0); });
@@ -23,7 +24,10 @@ bot.on("message", (m) => console.log(`[msg] ${m.toString()}`));
 
 function waitForChatMatch(regex, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`timeout waiting for /${regex.source}/`)), timeoutMs);
+    const timer = setTimeout(() => {
+      bot.removeListener("message", handler);
+      reject(new Error(`timeout waiting for /${regex.source}/`));
+    }, timeoutMs);
     function handler(m) {
       const match = m.toString().match(regex);
       if (match) { clearTimeout(timer); bot.removeListener("message", handler); resolve(match); }
@@ -58,7 +62,8 @@ bot.once("login", async () => {
   bot.chat("/rtps 100000");
   await sleep(500);
 
-  await bot.creative.flyTo(new Vec3(100, 70, 100));
+  bot.chat("/tp 100 70 100");
+  await sleep(500);
 
   console.log("[load] /load totp_core.litematic -c");
   bot.chat("/load totp_core.litematic -c");
@@ -98,22 +103,49 @@ bot.once("login", async () => {
   await sleep(WAIT_SECONDS * 1000);
   console.log(`[check] t+${Math.round((Date.now() - t0) / 1000)}s -- reading outputs now (single read)`);
 
-  async function countAt(pos, pattern) {
-    await bot.creative.flyTo(pos);
-    await sleep(200);
-    bot.chat("//pos1");
-    await waitForChatMatch(/First position set/, 10000);
-    bot.chat("//pos2");
-    await waitForChatMatch(/Second position set/, 10000);
-    bot.chat(`//count ${pattern}`);
-    const m = await waitForChatMatch(/Counted (\d+) block/, 15000);
-    return parseInt(m[1], 10);
+  async function countAt(pos, pattern, attempt = 0) {
+    try {
+      if (attempt > 0) {
+        // Force a real position change so the server emits a fresh
+        // confirmation -- a retry that re-sends //pos1 at an unchanged
+        // position can get no new chat message at all (no-op), hanging forever.
+        await bot.creative.flyTo(pos.offset(0, 3, 0));
+        await sleep(200);
+      }
+      await bot.creative.flyTo(pos);
+      await sleep(250);
+      bot.chat("//pos1");
+      await waitForChatMatch(/First position set/, 10000);
+      bot.chat("//pos2");
+      await waitForChatMatch(/Second position set/, 10000);
+      bot.chat(`//count ${pattern}`);
+      const m = await waitForChatMatch(/Counted (\d+) block/, 15000);
+      return parseInt(m[1], 10);
+    } catch (e) {
+      if (attempt >= 8) throw e;
+      console.log(`[retry] countAt ${pos} after: ${e.message}`);
+      await sleep(1000);
+      return countAt(pos, pattern, attempt + 1);
+    }
   }
   async function isLampLit(pos) {
     return (await countAt(pos, "minecraft:redstone_lamp")) === 0;
   }
 
-  const doneLit = await isLampLit(outputPos("done"));
+  const DIGIT_FROM_SEG = {
+    "1111110": 0, "0110000": 1, "1101101": 2, "1111001": 3, "0110011": 4,
+    "1011011": 5, "1011111": 6, "1110000": 7, "1111111": 8, "1111011": 9,
+  };
+
+  // Retry the whole done-check + read if done isn't lit yet -- the circuit
+  // may need more settle time than WAIT_SECONDS estimated.
+  let doneLit = false;
+  for (let extra = 0; extra < 6; extra++) {
+    doneLit = await isLampLit(outputPos("done"));
+    if (doneLit) break;
+    console.log(`[result] done=false, waiting 15s more (round ${extra + 1})`);
+    await sleep(15000);
+  }
   console.log(`[result] done=${doneLit}`);
   if (doneLit) {
     let code = 0;
@@ -122,6 +154,19 @@ bot.once("login", async () => {
       if (lit) code |= (1 << i);
     }
     console.log(`[result] code=${code} expected=${EXPECT} match=${code === EXPECT} total_time=${Math.round((Date.now() - t0) / 1000)}s`);
+
+    let display = "";
+    for (let digit = 5; digit >= 0; digit--) {
+      let segBits = "";
+      for (let s = 6; s >= 0; s--) {
+        const lit = await isLampLit(outputPos(`seg${digit}[${s}]`));
+        segBits += lit ? "1" : "0";
+      }
+      const d = DIGIT_FROM_SEG[segBits];
+      console.log(`[seg] seg${digit} bits=${segBits} -> digit=${d}`);
+      display += d === undefined ? "?" : String(d);
+    }
+    console.log(`[result] display=${display} code=${code} expected=${EXPECT}`);
   } else {
     console.log("[result] NOT DONE after single-read window");
   }

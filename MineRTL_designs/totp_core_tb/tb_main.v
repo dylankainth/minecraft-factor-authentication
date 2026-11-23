@@ -6,8 +6,29 @@ module tb_main;
     reg [31:0] counter;
     wire [19:0] code;
     wire done;
+    wire [6:0] seg0, seg1, seg2, seg3, seg4, seg5;
 
-    main dut(.clk(clk), .rst(rst), .start(start), .counter(counter), .code(code), .done(done));
+    main dut(.clk(clk), .rst(rst), .start(start), .counter(counter), .code(code), .done(done),
+              .seg0(seg0), .seg1(seg1), .seg2(seg2), .seg3(seg3), .seg4(seg4), .seg5(seg5));
+
+    function [6:0] expected_seg;
+        input [3:0] d;
+        begin
+            case (d)
+                4'd0: expected_seg = 7'b1111110;
+                4'd1: expected_seg = 7'b0110000;
+                4'd2: expected_seg = 7'b1101101;
+                4'd3: expected_seg = 7'b1111001;
+                4'd4: expected_seg = 7'b0110011;
+                4'd5: expected_seg = 7'b1011011;
+                4'd6: expected_seg = 7'b1011111;
+                4'd7: expected_seg = 7'b1110000;
+                4'd8: expected_seg = 7'b1111111;
+                4'd9: expected_seg = 7'b1111011;
+                default: expected_seg = 7'b0000000;
+            endcase
+        end
+    endfunction
 
     always #5 clk = ~clk;
 
@@ -27,8 +48,17 @@ module tb_main;
             if (code !== expect_code) begin
                 $display("FAIL counter=%0d expected=%0d got=%0d", ctr, expect_code, code);
                 fails = fails + 1;
+            end else if (seg0 !== expected_seg(expect_code % 10) ||
+                         seg1 !== expected_seg((expect_code / 10) % 10) ||
+                         seg2 !== expected_seg((expect_code / 100) % 10) ||
+                         seg3 !== expected_seg((expect_code / 1000) % 10) ||
+                         seg4 !== expected_seg((expect_code / 10000) % 10) ||
+                         seg5 !== expected_seg((expect_code / 100000) % 10)) begin
+                $display("FAIL counter=%0d code=%0d but seven-seg digits wrong: seg5..0=%b %b %b %b %b %b",
+                         ctr, code, seg5, seg4, seg3, seg2, seg1, seg0);
+                fails = fails + 1;
             end else begin
-                $display("PASS counter=%0d code=%0d", ctr, code);
+                $display("PASS counter=%0d code=%0d seg5..0=%b %b %b %b %b %b", ctr, code, seg5, seg4, seg3, seg2, seg1, seg0);
             end
             // wait until FSM returns to IDLE before next run
             @(posedge clk);

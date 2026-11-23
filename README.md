@@ -446,3 +446,61 @@ round-trips for anything more interactive. The reproducer and diagnostic scripts
 `bot/totp_verify_inputs.js`, `MineRTL_designs/repro_counter/main.v`) are kept as evidence of how this was
 found. Detailed debugging trail across the whole investigation is in
 `docs/handoff-live-verification-2026-11-19.md` and `docs/handoff-optimization-2026-11-19.md`.
+
+## Seven-segment display (2026-11-23)
+
+Added a real, physical six-digit seven-segment display to the core's output, so the code can be read
+straight off redstone lamps instead of decoding 20 binary bits by hand. `main.v` now converts `code` to
+BCD (repeated `% 10` / `/ 10`, same technique already used for the `% 1000000` truncation) and decodes
+each digit through a standard seven-segment lookup, exposing `seg0`–`seg5` (`seg5` = leftmost/most
+significant digit, `seg0` = rightmost). Icarus Verilog simulation confirms all 10 RFC 4226 vectors' digit
+patterns are correct in the testbench.
+
+**Root cause of the first attempt silently placing no lamps at all.** MineRTL's `output_pin_targets`
+mechanism (`--output-pin-targets-json`) accepts a target as either a plain `(x, y)` — which just routes a
+bare wire to that cell, no lamp block — or `{"x":…, "y":…, "tile": 3}`, which places a real 3×3 block of
+lamps via `_lamp_tile`. The project's own `pin_targets.json` array format `[x, y, z]` is explicitly
+normalized to the *plain* 2-tuple form by `minecraft_v/main.py`'s loader (the third element is ignored),
+not the tile form — so the first synthesis attempt, which copied that array format verbatim from MineRTL's
+own `examples/sevenseg/`, built cleanly (0 failed nets, 0 verify errors) but never placed a single visible
+lamp for the display. Confirmed by writing a from-scratch NBT decoder for the `.litematic` file (no
+server involved) and counting real `redstone_lamp` palette entries directly: 29 total (`done` + 20 `code`
+bits), zero for any `seg` port. Fixed by switching `pin_targets.json` to the `{"tile": 3}` dict form for
+all 42 segment pins, with a hand-designed pitch-3 seven-segment layout (tiles must not overlap, and the
+docstring's examples use exactly `3`-unit spacing); re-synthesized clean (0 failed, 0 verify, 42/42
+extensions routed), and the same NBT decoder now finds 352 real lamp blocks at the display's z-layer
+(close to the ideal 42×9=378 — the difference is lamps shared at touching tile edges, which the engine's
+own docstring says is expected: "tiles can touch").
+
+Per the engine's own docstring, a `tile: 3` target's **anchor is the lower-left lamp, but only the middle
+lamp (anchor + (1,1)) is actually driven by the wire** — the other 8 are structural bulk. Missing this on
+the first live read attempt produced garbled, inconsistent digit reads (reading a static corner lamp, not
+the live one); fixed in the reader (`bot/totp_read_seg_single.js`'s `outputPos`) by adding `+1,+1` to any
+`seg*` pin's stored anchor position. Two of the 42 tiles were nudged by a block or two during placement
+(router collision avoidance) — found by decoding the litematic and comparing every computed anchor against
+the real block it should land on; both cases are now hardcoded fixups in `scripts_build_seg_pins.py`.
+
+**Live verification status, honestly:** the binary `code` output is fully confirmed live on this exact
+seg-enabled build — `done=true, code=755224`, an exact match to the RFC 4226 expected value for counter 0,
+read directly off the real server after a restart (which also fixed unrelated server-responsiveness
+degradation from many hours of earlier bot churn in the same session — paste time dropped from 15–35s to
+4.75s). The seven-segment *digit* lamps themselves are strongly evidenced offline (clean synthesis, 352
+real lamp blocks in the correct tile-center positions) but were **not** cleanly confirmed end-to-end live
+in one run this session — reading all 62 lamps (`done` + 20 `code` + 42 `seg`) one WorldEdit round-trip at
+a time is slow under server load, and a real message-crosstalk bug was found and fixed along the way (a
+retry that skips re-sending a command when it sees *any* queued message matching the expected phrase, not
+specifically one carrying the current target's coordinates, can wrongly accept a stale reply left over
+from the previous lamp — confirmed by a run that read several bits as sparse, no-valid-digit patterns).
+Also confirmed `bot.blockAt()` (reading cached chunk data client-side, no server round-trip) **does not
+work against a Redpiler-compiled circuit** — it never reflected `done` going true even after 100+ seconds
+of polling, almost certainly because Redpiler's bulk block updates don't take the vanilla-protocol path
+mineflayer's world model expects; the server-authoritative `//count` command remains the only reliable
+read path. Per this project's own working rule (verify live, don't claim from reasoning alone), the digit
+readout is reported as a real, strongly-evidenced-but-not-live-confirmed gap, not a finished result — the
+same honesty bar this doc already held the XOR gate to.
+
+New files: `MineRTL_designs/totp_core/pin_targets.json` (tile-based layout), `bot/totp_read_seg_single.js`
+(single-connection reader, found/fixed the tile-center bug), `bot/totp_read_display_clean.js` (queue-based
+message matching, found/fixed the coordinate-crosstalk bug — the furthest-progressed reader, not yet a
+clean full pass), `scripts_build_seg_pins.py` (regenerates `pins.txt` from fresh synthesis artifacts,
+encodes both the `nz=-2` and tile-anchor-fixup findings above).
