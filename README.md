@@ -475,32 +475,44 @@ own docstring says is expected: "tiles can touch").
 Per the engine's own docstring, a `tile: 3` target's **anchor is the lower-left lamp, but only the middle
 lamp (anchor + (1,1)) is actually driven by the wire** — the other 8 are structural bulk. Missing this on
 the first live read attempt produced garbled, inconsistent digit reads (reading a static corner lamp, not
-the live one); fixed in the reader (`bot/totp_read_seg_single.js`'s `outputPos`) by adding `+1,+1` to any
-`seg*` pin's stored anchor position. Two of the 42 tiles were nudged by a block or two during placement
-(router collision avoidance) — found by decoding the litematic and comparing every computed anchor against
-the real block it should land on; both cases are now hardcoded fixups in `scripts_build_seg_pins.py`.
+the live one); fixed in the readers (`outputPos` in each `bot/totp_read_*.js`) by adding `+1,+1` to any
+`seg*` pin's stored anchor position.
 
-**Live verification status, honestly:** the binary `code` output is fully confirmed live on this exact
-seg-enabled build — `done=true, code=755224`, an exact match to the RFC 4226 expected value for counter 0,
-read directly off the real server after a restart (which also fixed unrelated server-responsiveness
-degradation from many hours of earlier bot churn in the same session — paste time dropped from 15–35s to
-4.75s). The seven-segment *digit* lamps themselves are strongly evidenced offline (clean synthesis, 352
-real lamp blocks in the correct tile-center positions) but were **not** cleanly confirmed end-to-end live
-in one run this session — reading all 62 lamps (`done` + 20 `code` + 42 `seg`) one WorldEdit round-trip at
-a time is slow under server load, and a real message-crosstalk bug was found and fixed along the way (a
-retry that skips re-sending a command when it sees *any* queued message matching the expected phrase, not
-specifically one carrying the current target's coordinates, can wrongly accept a stale reply left over
-from the previous lamp — confirmed by a run that read several bits as sparse, no-valid-digit patterns).
-Also confirmed `bot.blockAt()` (reading cached chunk data client-side, no server round-trip) **does not
-work against a Redpiler-compiled circuit** — it never reflected `done` going true even after 100+ seconds
-of polling, almost certainly because Redpiler's bulk block updates don't take the vanilla-protocol path
-mineflayer's world model expects; the server-authoritative `//count` command remains the only reliable
-read path. Per this project's own working rule (verify live, don't claim from reasoning alone), the digit
-readout is reported as a real, strongly-evidenced-but-not-live-confirmed gap, not a finished result — the
-same honesty bar this doc already held the XOR gate to.
+A second-session false lead, corrected: two of the 42 anchors (`seg5[4]`, `seg1[1]`) looked like they
+needed manual position "fixups" — the nearest real lamp block to the computed anchor, found by decoding
+the litematic directly, was a block or two off. Both fixups were **wrong** and have been removed. The real
+flaw was the verification method itself: a 3×3 tile has 9 clustered lamp blocks, so "find the nearest real
+lamp to this position" always finds *something* even when the computed anchor is already exactly correct.
+Confirmed via `mchprs_headless`'s `expect` directly against the compiled circuit (fast — a few seconds per
+check, deterministic, no live-server flakiness): the plain, un-adjusted anchor + (1, 1) formula is correct
+for all 42 segments. `scripts_build_seg_pins.py` no longer applies any fixup.
+
+**The real remaining bug, also found via headless: the seg output driver is active-low.** The signal
+`mchprs_headless`'s `expect segN[i]` reports is the exact bitwise *inverse* of `main.v`'s logical
+`seven_seg()` function — e.g. digit 7's logical pattern `1110000` reads back as `0001111`. Confirmed
+systematically across two full RFC vectors (counter=0 → `755224`, counter=1 → `287082`), asserting all 20
+`code` bits and all 42 `seg` bits in one headless run each: **0 failures, both vectors, ~5s per run.** All
+three live-reader scripts' `DIGIT_FROM_SEG` lookup tables are now the inverted patterns.
+
+**Fully confirmed, live, in-game, after fixing both of the above:** loaded fresh, drove counter=0, and read
+`done` + all 20 `code` bits + all 42 `seg` lamps directly off the real server — `code=755224` (exact RFC
+4226 match) and `display=755224` (every one of the 6 seven-segment digits decoded correctly: 7-5-5-2-2-4).
+This is the real headline result for this feature: a player can read the TOTP code straight off six
+physical seven-segment displays in a running server, not just decode 20 binary lamps by hand.
+
+One remaining honest caveat: a live-measured "compute time" (from driving `start` to first observing
+`done`) is **not** a reliable number — under this session's degraded server conditions it read as high as
+487s and 107s across different runs, almost entirely spent on WorldEdit command round-trips timing out and
+retrying, not redstone ticking (confirmed: server CPU was near-idle, ~1.5%, during the longest wait,
+consistent with the FSM having already latched `done` and gone idle, not still computing). The reliable
+timing number is headless: **all 10 RFC 4226 vectors, correctness-checked via Redpiler on this exact
+seg-enabled build, in 16.4 seconds total** — a few seconds per code once the one-time JIT compile is paid.
 
 New files: `MineRTL_designs/totp_core/pin_targets.json` (tile-based layout), `bot/totp_read_seg_single.js`
-(single-connection reader, found/fixed the tile-center bug), `bot/totp_read_display_clean.js` (queue-based
-message matching, found/fixed the coordinate-crosstalk bug — the furthest-progressed reader, not yet a
-clean full pass), `scripts_build_seg_pins.py` (regenerates `pins.txt` from fresh synthesis artifacts,
-encodes both the `nz=-2` and tile-anchor-fixup findings above).
+and `bot/totp_read_display_clean.js` (readers that found and fixed the tile-center-offset and
+message-queue-coordinate-crosstalk bugs respectively), `bot/totp_timed_live_test.js` (the final reader —
+resilient position handling via `/tp`-then-`flyTo` every attempt, tolerant position matching, and the
+corrected decode table — this is the one that got the full clean live pass), `scripts_build_seg_pins.py`
+(regenerates `pins.txt` from fresh synthesis artifacts, no fixups), `bot/totp_headless_seg_full.txt` /
+`bot/totp_headless_seg_full_v1.txt` (the headless test scripts that found and confirmed the fix, kept as
+evidence).

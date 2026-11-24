@@ -133,8 +133,12 @@ bot.once("login", async () => {
   }
 
   const DIGIT_FROM_SEG = {
-    "1111110": 0, "0110000": 1, "1101101": 2, "1111001": 3, "0110011": 4,
-    "1011011": 5, "1011111": 6, "1110000": 7, "1111111": 8, "1111011": 9,
+    // Inverted relative to seven_seg()'s logical bits in main.v -- the
+    // output driver is active-low (confirmed via mchprs_headless `expect`
+    // against the real compiled circuit: the observed signal is exactly
+    // NOT(seven_seg(digit)) for every one of the 10 RFC vectors).
+    "0000001": 0, "1001111": 1, "0010010": 2, "0000110": 3, "1001100": 4,
+    "0100100": 5, "0100000": 6, "0001111": 7, "0000000": 8, "0000100": 9,
   };
 
   // Retry the whole done-check + read if done isn't lit yet -- the circuit

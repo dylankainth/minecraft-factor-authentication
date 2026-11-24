@@ -20,15 +20,20 @@ this yourself" -- and now the live, player-visible in-game demo too: a player ca
 drive `rst`/`counter`/`start` via `/lever`, and watch the output lamps settle to the correct code in real
 time. Getting the live path working took real engine-level debugging across two sessions (2026-11-19 and
 2026-11-22) -- several real bugs found and fixed, the last and actual one being that `/load -c`'s block
-placement never scheduled the tick a self-oscillating clock needs to start. 2026-11-23 session added a
-real six-digit seven-segment display to the output (see README.md's new "Seven-segment display" section):
-root cause found and fixed (MineRTL's plain `(x,y)` pin-target form routes a bare wire with no lamp block;
-needed the `{"tile":3}` form), re-synthesized clean, and live-confirmed the underlying binary `code` output
-on this exact build (`code=755224`, exact match) after a server restart fixed unrelated responsiveness
-degradation -- but the seven-segment digit lamps themselves, while strongly evidenced offline (352 real
-lamp blocks correctly placed), were not cleanly confirmed in one live end-to-end read this session; see
-README for the honest state of that gap and the two real reader bugs found (tile-anchor vs. driven-lamp
-offset; message-queue coordinate crosstalk between consecutive lamp reads) before stopping for the night.
+placement never scheduled the tick a self-oscillating clock needs to start. 2026-11-23/24 sessions added a
+real six-digit seven-segment display to the output (see README.md's "Seven-segment display" section): root
+cause found and fixed (MineRTL's plain `(x,y)` pin-target form routes a bare wire with no lamp block;
+needed the `{"tile":3}` form), re-synthesized clean, and **fully confirmed live, in-game, on this exact
+build**: `code=755224` and `display=755224` (all 6 seven-segment digits decode correctly: 7-5-5-2-2-4) —
+read directly off the running server after a restart fixed unrelated responsiveness degradation. Getting
+there required finding and fixing two more real bugs beyond the initial placement fix: two of the 42 tile
+anchors had incorrect manual "fixups" from a flawed litematic-decode methodology (removed — the plain
+anchor+(1,1) formula was correct all along), and the seg output driver turned out to be active-low (the
+real signal is the bitwise inverse of `main.v`'s logical `seven_seg()` pattern) — both found and confirmed
+fast and deterministically via `mchprs_headless`'s `expect` against the real compiled circuit (0 failures
+across two full RFC vectors), then reconfirmed live. A live-measured "compute time" turned out to be
+unreliable (dominated by WorldEdit command-retry latency under degraded server conditions, not actual
+redstone ticking) — the honest timing number is headless: all 10 RFC vectors in 16.4s total via Redpiler.
 See docs/next_steps.md for remaining rough edges if picking this back up.)
 
 Files in this repo (commit them as-is):

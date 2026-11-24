@@ -1,0 +1,110 @@
+# counter=1, expect code=287082 -> digits 2,8,7,0,8,2 (seg5..seg0)
+set rst 1
+settle 2000
+set rst 0
+settle 2000
+set counter[0] 1
+set counter[1] 0
+set counter[2] 0
+set counter[3] 0
+set counter[4] 0
+set counter[5] 0
+set counter[6] 0
+set counter[7] 0
+set counter[8] 0
+set counter[9] 0
+set counter[10] 0
+set counter[11] 0
+set counter[12] 0
+set counter[13] 0
+set counter[14] 0
+set counter[15] 0
+set counter[16] 0
+set counter[17] 0
+set counter[18] 0
+set counter[19] 0
+set counter[20] 0
+set counter[21] 0
+set counter[22] 0
+set counter[23] 0
+set counter[24] 0
+set counter[25] 0
+set counter[26] 0
+set counter[27] 0
+set counter[28] 0
+set counter[29] 0
+set counter[30] 0
+set counter[31] 0
+settle 2000
+set start 1
+settle 200000
+expect done 1
+expect code[0] 0
+expect code[1] 1
+expect code[2] 0
+expect code[3] 1
+expect code[4] 0
+expect code[5] 1
+expect code[6] 1
+expect code[7] 0
+expect code[8] 1
+expect code[9] 0
+expect code[10] 0
+expect code[11] 0
+expect code[12] 0
+expect code[13] 1
+expect code[14] 1
+expect code[15] 0
+expect code[16] 0
+expect code[17] 0
+expect code[18] 1
+expect code[19] 0
+# seg5 = digit 2, NOT(1101101) = 0010010
+expect seg5[6] 0
+expect seg5[5] 0
+expect seg5[4] 1
+expect seg5[3] 0
+expect seg5[2] 0
+expect seg5[1] 1
+expect seg5[0] 0
+# seg4 = digit 8, NOT(1111111) = 0000000
+expect seg4[6] 0
+expect seg4[5] 0
+expect seg4[4] 0
+expect seg4[3] 0
+expect seg4[2] 0
+expect seg4[1] 0
+expect seg4[0] 0
+# seg3 = digit 7, NOT(1110000) = 0001111
+expect seg3[6] 0
+expect seg3[5] 0
+expect seg3[4] 0
+expect seg3[3] 1
+expect seg3[2] 1
+expect seg3[1] 1
+expect seg3[0] 1
+# seg2 = digit 0, NOT(1111110) = 0000001
+expect seg2[6] 0
+expect seg2[5] 0
+expect seg2[4] 0
+expect seg2[3] 0
+expect seg2[2] 0
+expect seg2[1] 0
+expect seg2[0] 1
+# seg1 = digit 8, NOT(1111111) = 0000000
+expect seg1[6] 0
+expect seg1[5] 0
+expect seg1[4] 0
+expect seg1[3] 0
+expect seg1[2] 0
+expect seg1[1] 0
+expect seg1[0] 0
+# seg0 = digit 2, NOT(1101101) = 0010010
+expect seg0[6] 0
+expect seg0[5] 0
+expect seg0[4] 1
+expect seg0[3] 0
+expect seg0[2] 0
+expect seg0[1] 1
+expect seg0[0] 0
+print final

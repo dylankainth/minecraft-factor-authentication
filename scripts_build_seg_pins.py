@@ -39,13 +39,16 @@ for i in range(20):
 # (_lamp_tile) and only the MIDDLE lamp (anchor + (1,1)) is actually driven
 # by the wire, per the engine's own docstring -- readers (see
 # bot/totp_read_seg_single.js's outputPos) apply that +1,+1 themselves.
-# Two tiles were nudged by the router during placement (confirmed by
-# decoding the litematic directly and finding the real lamp cluster
-# offset from its nominal anchor).
+# NOTE: an earlier version of this script applied hand-found "fixups" to
+# seg5[4] and seg1[1], based on finding the nearest real lamp block to the
+# nominal anchor in a decoded litematic. That methodology was WRONG and has
+# been removed: a 3x3 tile has 9 clustered lamp blocks, so "nearest lamp"
+# always finds *something* even when the nominal (un-adjusted) anchor is
+# already correct. Confirmed via mchprs_headless's `expect` against the
+# actual compiled circuit (fast, deterministic, no fixup needed) that the
+# plain anchor + (1,1) formula is correct for every one of the 42 segments.
 placed = json.load(open(pin_targets_placed_path))
-anchor_fixups = {"seg5[4]": (-1, -1), "seg1[1]": (-2, 0)}
 for name, pos in sorted(placed.items()):
-    dx, dy = anchor_fixups.get(name, (0, 0))
-    lines.append(f"{name} {pos[0] + dx} {pos[1] + dy} {pos[2]} 0 0")
+    lines.append(f"{name} {pos[0]} {pos[1]} {pos[2]} 0 0")
 
 print("\n".join(lines))
